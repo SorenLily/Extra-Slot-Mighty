@@ -1,0 +1,90 @@
+global bool isMighty
+global u16 selected_char
+
+//# address-hook(0x00c570) end(0x00c860)
+function void DataSelectScreen()
+{
+	debugLog("High level update")
+	base.DataSelectScreen()
+}
+
+function void DataSelect.setup()
+{
+	debugLog("DataSelect.setup()")
+	base.DataSelect.setup()
+}
+
+function void DataSelect.update()
+{
+	debugLog("DataSelect.update()")
+	base.DataSelect.update()
+	debugLog("DataSelect.update - end")
+}
+
+
+//# address-hook(0x00d42c) end(0x00d69a)
+function void fn00d42c()
+{
+	//debugLog("fn00d42c()")
+	// This function runs once for every save-select object
+	base.fn00d42c()
+}
+
+// THIS FUNCTION IS NOT A BOOL. Even though the return type in its signature is bool, it can return 0, 1, or 2.
+function bool fn00d458()
+{
+	u8 result = base.fn00d458()
+	debugLog("fn00d458():")
+	debugLog(result)
+	return result
+}
+
+//# address-hook(0x00d6d0) end(0x00d70a)
+function void fn00d6d0()
+{
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	D0.u16 = selected_char
+	if (D0.u16 >= max_characters)
+	{
+		D0.u16 -= 1
+		base.fn00d6d0()
+		D0.u16 += D0.u16 ? 1 : 0
+		selected_char = D0.u16
+		if (selected_char == max_characters + 1)
+		{
+			D0 = 2
+		}
+		else if (selected_char == max_characters + 2)
+		{
+			D0 = 0
+			selected_char = 0
+		}
+	}
+	else
+	{
+		base.fn00d6d0()
+		selected_char = D0.u16
+	}
+}
+
+//# address-hook(0x00c154) end(0x00c260)
+function void InitSaveSlots()
+{
+	debugLog("Init Save Slots")
+	base.InitSaveSlots()
+}
+
+/* Functional Functions:
+	fn00d1fa() - Checks for LEFT+RIGHT inputs to scroll between saves, checks for "BACK" to exit menu, and checks for "Y".
+	fn00d42c() - Checks for ACCEPT input when hovering over a new save, and begins it.
+	fn00d458() - Checks for UP+DOWN inputs to change zones
+	fn00d6d0() - Checks for UP+DOWN inputs to change characters.
+
+	u16[0xffffef4c] = "dataselect.nosave_characters"
+*/
+
+/* Rendering functions:
+	fn00c006()
+	fn00d69e()
+	fn00d96a()
+*/
