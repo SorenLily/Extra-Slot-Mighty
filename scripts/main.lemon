@@ -33,9 +33,27 @@ function void fn00d42c()
 // THIS FUNCTION IS NOT A BOOL. Even though the return type in its signature is bool, it can return 0, 1, or 2.
 function bool fn00d458()
 {
+	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
 	debugLog("fn00d458():")
 	debugLog(result)
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	if ((result == 1) && (selected_char > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	{
+		debugLog("Save extra persistent data")
+		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
+		u32 address = 0x801100 + slotIndex * 0x20
+		u8[address + 0x04] = 1
+		isMighty = 1
+	}
+	else if (result == 0)
+	{
+		debugLog("Load extra persistent data")
+		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
+		u32 address = 0x801100 + slotIndex * 0x20
+		if (u8[address + 0x04] == 1)
+			isMighty = 1
+	}
 	return result
 }
 
@@ -65,6 +83,7 @@ function void fn00d6d0()
 		base.fn00d6d0()
 		selected_char = D0.u16
 	}
+	debugLog(selected_char)
 }
 
 //# address-hook(0x00c154) end(0x00c260)
@@ -72,6 +91,14 @@ function void InitSaveSlots()
 {
 	debugLog("Init Save Slots")
 	base.InitSaveSlots()
+}
+
+function void saveExtraCharData()
+{
+	// Store additional data
+	u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
+	u32 address = 0x801100 + slotIndex * 0x20
+	u32[address] = player.score
 }
 
 /* Functional Functions:
@@ -88,3 +115,9 @@ function void InitSaveSlots()
 	fn00d69e()
 	fn00d96a()
 */
+
+function void UpdateGameObjects()
+{
+	base.UpdateGameObjects()
+	debugLog(stringformat("isMighty = %d", isMighty))
+}
