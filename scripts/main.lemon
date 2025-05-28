@@ -4,39 +4,50 @@ global u16 selected_char
 //# address-hook(0x00c570) end(0x00c860)
 function void DataSelectScreen()
 {
-	debugLog("High level update")
 	base.DataSelectScreen()
 }
 
 function void DataSelect.setup()
 {
-	debugLog("DataSelect.setup()")
+	isMighty = 0
 	base.DataSelect.setup()
 }
 
 function void DataSelect.update()
 {
-	debugLog("DataSelect.update()")
 	base.DataSelect.update()
-	debugLog("DataSelect.update - end")
 }
 
-
-//# address-hook(0x00d42c) end(0x00d69a)
-function void fn00d42c()
+//# address-hook(0x00d1fa) end(0x00d30a)
+function void fn00d1fa()
 {
-	//debugLog("fn00d42c()")
-	// This function runs once for every save-select object
-	base.fn00d42c()
+	if (u16[0xffffeee4] == 0 && (control.pad1.pressed & CONTROL_B || Input.buttonPressed(BUTTON_BACK)))
+	{
+		selected_char = 0
+		base.fn00d1fa()
+		return
+	}
+	u8 slot_selected_temp = dataselect.slot_selected
+	base.fn00d1fa()
+	if (slot_selected_temp != dataselect.slot_selected)
+	{
+		if (dataselect.slot_selected == 0 || dataselect.slot_selected == 9)
+		{
+			selected_char = 0
+		}
+		else if (dataselect.slot_selected >= 1 && dataselect.slot_selected <= 8)
+		{
+			u32 address = 0xffffb128 + 0x4a * (dataselect.slot_selected - 1)
+			selected_char = u8[address + 0x35]
+		}
+	}
 }
 
-// THIS FUNCTION IS NOT A BOOL. Even though the return type in its signature is bool, it can return 0, 1, or 2.
+// THIS FUNCTION IS NOT A BOOL. Even though its signature says "bool", it can return 0, 1, or 2.
 function bool fn00d458()
 {
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
-	debugLog("fn00d458():")
-	debugLog(result)
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	if ((result == 1) && (selected_char > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
@@ -70,7 +81,7 @@ function void fn00d6d0()
 		selected_char = D0.u16
 		if (selected_char == max_characters + 1)
 		{
-			D0 = 2
+			D0 = 3
 		}
 		else if (selected_char == max_characters + 2)
 		{
@@ -86,38 +97,11 @@ function void fn00d6d0()
 	debugLog(selected_char)
 }
 
-//# address-hook(0x00c154) end(0x00c260)
-function void InitSaveSlots()
-{
-	debugLog("Init Save Slots")
-	base.InitSaveSlots()
-}
-
-function void saveExtraCharData()
-{
-	// Store additional data
-	u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
-	u32 address = 0x801100 + slotIndex * 0x20
-	u32[address] = player.score
-}
-
 /* Functional Functions:
 	fn00d1fa() - Checks for LEFT+RIGHT inputs to scroll between saves, checks for "BACK" to exit menu, and checks for "Y".
-	fn00d42c() - Checks for ACCEPT input when hovering over a new save, and begins it.
-	fn00d458() - Checks for UP+DOWN inputs to change zones
+	fn00d42c() - Checks for ACCEPT input when hovering over an empty save, and begins it.
+	fn00d458() - Checks for UP+DOWN inputs to change zones.
 	fn00d6d0() - Checks for UP+DOWN inputs to change characters.
 
 	u16[0xffffef4c] = "dataselect.nosave_characters"
 */
-
-/* Rendering functions:
-	fn00c006()
-	fn00d69e()
-	fn00d96a()
-*/
-
-function void UpdateGameObjects()
-{
-	base.UpdateGameObjects()
-	debugLog(stringformat("isMighty = %d", isMighty))
-}
