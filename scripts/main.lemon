@@ -1,5 +1,4 @@
 global bool is_mighty
-global u16 selected_char
 
 function void DataSelect.setup()
 {
@@ -7,42 +6,6 @@ function void DataSelect.setup()
 	// There are other places to put this, but I think here makes sense.
 	is_mighty = 0
 	base.DataSelect.setup()
-}
-
-//# address-hook(0x00d1fa) end(0x00d30a)
-function void fn00d1fa()
-{
-	// This is the update function of an object that seems to be the main "data select controller".
-	if (u16[0xffffeee4] == 0 && (control.pad1.pressed & CONTROL_B || Input.buttonPressed(BUTTON_BACK)))
-	{
-		// If we get here, the base function will change global.game_mode to 0x04, which causes the
-		// game to exit the main menu. Once this happens, it is very hard to get any modded code
-		// to run. So this is a good place to do any kind of cleanup when exiting to main menu.
-		selected_char = 0
-		base.fn00d1fa()
-		return
-	}
-	// 
-	u8 slot_selected_temp = dataselect.slot_selected
-	base.fn00d1fa()
-	// If dataselect.slot_selected changed...
-	if (slot_selected_temp != dataselect.slot_selected)
-	{
-		// If the first or last slot...
-		if (dataselect.slot_selected == 0 || dataselect.slot_selected == 9)
-		{
-			// TODO: is this necessary? Probably not.
-			selected_char = 0
-		}
-		// Else if slots 1 to 8...
-		else if (dataselect.slot_selected >= 1 && dataselect.slot_selected <= 8)
-		{
-			// Get the address of the selected save slot object.
-			u32 address = 0xffffb128 + 0x4a * (dataselect.slot_selected - 1)
-			// This value stores the selected character in the save slot object.
-			selected_char = u8[address + 0x35]
-		}
-	}
 }
 
 //# address-hook(0x00d39e) end(0x00d426)
@@ -76,7 +39,7 @@ function bool fn00d458()
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
-	if ((result == 1) && (selected_char > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (u8[A0 + 0x35] > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		debugLog("Save extra persistent data")
 		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
@@ -99,29 +62,17 @@ function bool fn00d458()
 function void fn00d6d0()
 {
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
-	D0.u16 = selected_char
 	if (D0.u16 >= max_characters)
 	{
 		D0.u16 -= 1
 		base.fn00d6d0()
 		D0.u16 += D0.u16 ? 1 : 0
-		selected_char = D0.u16
-		if (selected_char == max_characters + 1)
-		{
-			//D0 = 3
-		}
-		else if (selected_char == max_characters + 2)
-		{
-			D0 = 0
-			selected_char = 0
-		}
 	}
 	else
 	{
 		base.fn00d6d0()
-		selected_char = D0.u16
 	}
-	debugLog(selected_char)
+	debugLog(D0.u16)
 }
 
 function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
