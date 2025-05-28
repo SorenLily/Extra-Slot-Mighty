@@ -16,7 +16,8 @@ function void fn00d39e()
 	if (u8[address + 0x04] == 1)
 	{
 		debugLog("Adjust save slot char on init")
-		u8[A0 + 0x35] = (u8[A1 + 0x02] & 0x0f) | 0x10
+		u8[A0 + 0x35] = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 5 : 4)
+		debugLog(u8[A0 + 0x35])
 	}
 }
 
@@ -30,6 +31,7 @@ function void fn00d42c()
 		debugLog("New game started")
 		levelselect.characters = 1
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | 0x10
+		debugLog(u8[A1 + 0x02])
 	}
 }
 
@@ -42,18 +44,25 @@ function bool fn00d458()
 	if ((result == 1) && (u8[A0 + 0x35] > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		debugLog("Save extra persistent data")
+		// Compute address of extra save slot data.
 		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
 		u32 address = 0x801100 + slotIndex * 0x20
+		// Set an additional byte of data to record that this is a Mighty file.
 		u8[address + 0x04] = 1
 		is_mighty = 1
 	}
 	else if (result == 0)
 	{
 		debugLog("Load extra persistent data")
+		// Compute address of extra save slot data.
 		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
 		u32 address = 0x801100 + slotIndex * 0x20
+		// Check extra save slot data to see if this is a Mighty save.
 		if (u8[address + 0x04] == 1)
+		{
 			is_mighty = 1
+			levelselect.characters = 1
+		}
 	}
 	return result
 }
@@ -112,9 +121,3 @@ function void DataSelect.update()
 	fn00d458() - Checks for UP+DOWN inputs to change zones.
 	fn00d6d0() - Checks for UP+DOWN inputs to change characters.
 */
-
-function void UpdateGameObjects()
-{
-	base.UpdateGameObjects()
-	debugLog(is_mighty)
-}
