@@ -1,0 +1,123 @@
+global bool is_mighty
+
+function void DataSelect.setup()
+{
+	// This needs to be cleared if the player starts a game and then exits back to the main menu.
+	// There are other places to put this, but I think here makes sense.
+	is_mighty = 0
+	base.DataSelect.setup()
+}
+
+//# address-hook(0x00d39e) end(0x00d426)
+function void fn00d39e()
+{
+	base.fn00d39e()
+	u32 address = 0x801100 + u32(objA0.flags2e) * 0x20
+	if (u8[address + 0x04] == 1)
+	{
+		debugLog("Adjust save slot char on init")
+		u8[A0 + 0x35] = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 5 : 4)
+		debugLog(u8[A0 + 0x35])
+	}
+}
+
+//# address-hook(0x00d42c) end(0x00d69a)
+function void fn00d42c()
+{
+	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
+	base.fn00d42c()
+	if (filler_byte_temp != u8[A1 + 0x01])
+	{
+		debugLog("New game started")
+		levelselect.characters = 1
+		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | 0x10
+		debugLog(u8[A1 + 0x02])
+	}
+}
+
+// THIS FUNCTION IS NOT A BOOL. Even though its signature says "bool", it can return 0, 1, or 2.
+function bool fn00d458()
+{	
+	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
+	u8 result = base.fn00d458()
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	if ((result == 1) && (u8[A0 + 0x35] > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	{
+		debugLog("Save extra persistent data")
+		// Compute address of extra save slot data.
+		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
+		u32 address = 0x801100 + slotIndex * 0x20
+		// Set an additional byte of data to record that this is a Mighty file.
+		u8[address + 0x04] = 1
+		is_mighty = 1
+	}
+	else if (result == 0)
+	{
+		debugLog("Load extra persistent data")
+		// Compute address of extra save slot data.
+		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
+		u32 address = 0x801100 + slotIndex * 0x20
+		// Check extra save slot data to see if this is a Mighty save.
+		if (u8[address + 0x04] == 1)
+		{
+			is_mighty = 1
+			levelselect.characters = 1
+		}
+	}
+	return result
+}
+
+//# address-hook(0x00d6d0) end(0x00d70a)
+function void fn00d6d0()
+{
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	if (D0.u16 >= max_characters)
+	{
+		D0.u16 -= 1
+		base.fn00d6d0()
+		D0.u16 += D0.u16 ? 1 : 0
+	}
+	else
+	{
+		base.fn00d6d0()
+	}
+	debugLog(D0.u16)
+}
+
+function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
+{
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	if ((objA0.update_address == 0x00d30c || objA0.update_address == 0x00d42c) && (u8[A0 + 0x35] > max_characters))
+	{
+		SpriteHandle spr = Renderer.addSpriteHandle("charselect_mighty", px, py, renderQueue)
+		return true
+	}
+	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+}
+
+///////////////////////////////
+///		 DOCUMENTATION		///
+///////////////////////////////
+
+//# address-hook(0x00c570) end(0x00c860)
+function void DataSelectScreen()
+{
+	// This hook straight up does not work. Any code added here will not be run.
+	base.DataSelectScreen()
+}
+
+function void DataSelect.update()
+{
+	// This function has bizzare behavior. Any code written before the base call will work fine,
+	// but the base function *does not return* until you exit the Data Select screen.
+	base.DataSelect.update()
+	// Additionally, if you exit to the main menu instead of selecting a save file, any code written
+	// after the base call just doesn't get run at all.
+}
+
+/* Some Notable Functions:
+	fn00d1fa() - Checks for LEFT+RIGHT inputs to scroll between saves, checks for "BACK" to exit menu, and checks for "Y".
+	fn00d42c() - Checks for ACCEPT input when hovering over an empty save, and begins it.
+	fn00d458() - Checks for UP+DOWN inputs to change zones.
+	fn00d6d0() - Checks for UP+DOWN inputs to change characters.
+*/
