@@ -84,17 +84,35 @@ function void fn00d6d0()
 	debugLog(D0.u16)
 }
 
-function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
+function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 index, u16 renderQueue, u8 spriteCounter)
 {
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	if ((objA0.update_address == 0x00d30c || objA0.update_address == 0x00d42c) && (u8[A0 + 0x35] > max_characters))
 	{
-		SpriteHandle spr = Renderer.addSpriteHandle("charselect_mighty", px, py, renderQueue)
-		return true
+		if (index == (0xa351))
+		{
+			SpriteHandle spr1 = Renderer.addSpriteHandle("menu_characters_mighty", px+20, py+48, renderQueue)
+			SpriteHandle spr2 = Renderer.addSpriteHandle("dataselect_lives_icon_mighty", px+4, py+80, renderQueue)
+			SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
+			SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
+			SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+104, renderQueue)
+			return true
+		}
 	}
-	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+	return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 }
 
+function void fn001506()
+{
+	if (D1 == 2 && D2 == 4)
+	{
+		if (u8[A3 + 0x35] > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
+		{
+			return
+		}
+	}
+	base.fn001506()
+}
 ///////////////////////////////
 ///		 DOCUMENTATION		///
 ///////////////////////////////
