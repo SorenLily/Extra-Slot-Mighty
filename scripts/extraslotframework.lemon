@@ -91,8 +91,8 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 	{
 		if (index == (0xa351))
 		{
-			SpriteHandle spr1 = Renderer.addSpriteHandle("menu_characters_mighty", px+20, py+48, renderQueue)
-			SpriteHandle spr2 = Renderer.addSpriteHandle("dataselect_lives_icon_mighty", px+4, py+80, renderQueue)
+			SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", px+8, py+35, renderQueue)
+			SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+4, py+80, renderQueue)
 			SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
 			SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
 			SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+104, renderQueue)
