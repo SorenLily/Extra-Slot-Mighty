@@ -113,6 +113,60 @@ function void fn001506()
 	}
 	base.fn001506()
 }
+
+///////////////////////////////
+///	  CHARACTER RENDERING	///
+///////////////////////////////
+function string getCharacterPaletteKey(u8 character)
+{
+	if (is_mighty)
+	{
+		return "mighty_palette"
+	}
+	return base.getCharacterPaletteKey(character)
+}
+
+function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
+{
+	if (objA0.update_address == 0x010a94 && is_mighty)
+	{
+		//bool result = Standalone.drawCharacterSprite(char.character, 0, px, py, false)
+		u8 index = getCharSpriteIndex()
+		string str = stringformat("character_mighty_0x%02x", index)
+		debugLog(str)
+		if (str != "character_mighty_0x00")
+		{
+			SpriteHandle spr = Renderer.addSpriteHandle(str, px, py, renderQueue)
+			spr.setFlipX(char.render_flags & render_flag.FLIP_X)
+			spr.setPriorityFlag(char.sprite_priority & sprite_attribute.PRIORITY)
+			return true
+		}
+		
+	}
+	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+}
+
+function u8 getCharSpriteIndex()
+{
+	u8 animationSprite = char.animation.sprite
+	if (animationSprite >= 0x01 && animationSprite <= 0x20)
+	{
+		// Walking animation
+		animationSprite = 0x01 + (animationSprite - 0x01) % 8
+	}
+	else if (animationSprite >= 0x21 && animationSprite <= 0x30)
+	{
+		// Running animation
+		animationSprite = 0x21 + (animationSprite - 0x21) % 4
+	}
+	else if (animationSprite >= 0x78 && animationSprite <= 0x7f)
+	{
+		// Swinging animation
+		animationSprite = 0x78
+	}
+	return animationSprite
+}
+
 ///////////////////////////////
 ///		 DOCUMENTATION		///
 ///////////////////////////////
