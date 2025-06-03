@@ -1,12 +1,19 @@
 global u16 hammer_drop_state
 global u8 bouncy_ball_state
-// global u8 bouncy_ball_state_prev
 global u8 wall_cling
 global u8 cling_timer
+global u8 block_spikes
 
+// Helper function
 function bool isMighty()
 {
     return (is_mighty && (A0 == 0xffffb000))
+}
+
+// Helper function
+function u32 square(u32 x)
+{
+    return (x * x)
 }
 
 function void Character.Initialization.shared(u8 character)
@@ -15,6 +22,7 @@ function void Character.Initialization.shared(u8 character)
     bouncy_ball_state = 0
     wall_cling = 0
     cling_timer = 0
+    block_spikes = 0
     base.Character.Initialization.shared(character)
 }
 
@@ -119,7 +127,7 @@ function void Character.UpdateControlInAir()
 
     if (hammer_drop_state >= 1)
     {
-        char.velocity.y = clamp(char.velocity.y + 0xc0, 0, 0xc00)
+        char.velocity.y = clamp(char.velocity.y + 0xc0, 0, 0x1000)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
 }
@@ -138,12 +146,6 @@ function void Character.LandingOnGroundResetState()
         wall_cling = 0
         cling_timer = 0
     }
-}
-
-// Helper function
-function u32 square(u32 x)
-{
-    return (x * x)
 }
 
 // Helper function
@@ -238,11 +240,26 @@ function void Character.OnCollisionWithDynamicObject()
 {
     s16 velocity_temp = char.velocity.y
     base.Character.OnCollisionWithDynamicObject()
-    if (hammer_drop_state && char.base_state != base_state.HURT)
+    if (isMighty() && hammer_drop_state && char.base_state != base_state.HURT)
     {
         // Prevent the character's fall from being interrupted during hammer drop.
         char.velocity.y = velocity_temp
     }
+}
+
+//# address-hook(0x00ff06) end(0x00ff5e)
+function void Character.CheckCollisionsWithDynamicObjects_partial()
+{
+    if (!isMighty())
+    {
+        base.Character.CheckCollisionsWithDynamicObjects_partial()
+        return
+    }
+
+    u8 bonus_effect_temp = char.bonus_effect
+    char.bonus_effect |= char.bonus.INVINCIBLE
+    base.Character.CheckCollisionsWithDynamicObjects_partial()
+    char.bonus_effect = bonus_effect_temp
 }
 
 //# address-hook(0x011eec) end(0x011fd4)
@@ -257,7 +274,7 @@ function void Character.CheckCollision()
         base.Character.CheckCollision()
         return
     }
-    
+
     if (cling_timer && char.base_state == base_state.NORMAL)
     {
         D5.u8 = char.layer_flags2
@@ -271,8 +288,7 @@ function void Character.CheckCollision()
             {
                 wall_cling = 1
                 cling_timer = 0
-            }
-                
+            }     
         }
             
         else if (char.velocity.x < 0)
@@ -305,9 +321,85 @@ function void Character.UpdateSonicRollingInAir()
             char.velocity.y = -0x680
             char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
             wall_cling = 0
-            char.jumping = 1
+            char.double_jump_state = 0
         }
         return
     }
     base.Character.UpdateSonicRollingInAir()
+}
+
+//////////////////////////
+///       SPIKES       ///
+//////////////////////////
+
+// Floor, Ceiling, and Wall spikes all have different update functions.
+
+//# address-hook(0x024090) end(0x0240dc)
+function void Spikes.Update()
+{
+    if (hammer_drop_state || bouncy_ball_state)
+    {
+        block_spikes = 1
+    }
+    base.Spikes.Update()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+        
+}
+
+//# address-hook(0x0240e2) end(0x024138)
+function void fn0240e2()
+{
+    if (hammer_drop_state || bouncy_ball_state)
+    {
+        block_spikes = 1
+    }
+    base.fn0240e2()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x02413e) end(0x024188)
+function void fn02413e()
+{
+    if (hammer_drop_state || bouncy_ball_state)
+    {
+        block_spikes = 1
+    }
+    base.fn02413e()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x010294) end(0x010364)
+function void Character.GettingHurt()
+{
+    if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
+    {
+        u8 protection_temp = char.protection_flag
+        char.protection_flag |= 0x80
+        block_spikes = 2
+        base.Character.GettingHurt()
+        char.protection_flag = protection_temp
+        block_spikes = 3
+    }
+    else
+    {
+        base.Character.GettingHurt()
+    }
+}
+
+function void Character.HurtCheckForStateChange()
+{
+    base.Character.HurtCheckForStateChange()
+    if (char.base_state == base_state.NORMAL)
+    {
+        char.invuln.countdown = 30
+    }
 }
