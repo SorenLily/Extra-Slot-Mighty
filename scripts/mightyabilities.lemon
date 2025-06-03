@@ -1,29 +1,42 @@
 global u16 hammer_drop_state
 global u8 bouncy_ball_state
 // global u8 bouncy_ball_state_prev
+global u8 wall_cling
+global u8 cling_timer
+
+function bool isMighty()
+{
+    return (is_mighty && (A0 == 0xffffb000))
+}
 
 function void Character.Initialization.shared(u8 character)
 {
     hammer_drop_state = 0
     bouncy_ball_state = 0
+    wall_cling = 0
+    cling_timer = 0
     base.Character.Initialization.shared(character)
 }
 
 //# address-hook(0x010a94) end(0x010ae8)
 function void Character.BaseUpdate.Sonic()
 {
-    if (is_mighty && (char.base_state != 0x02 || !(char.flags & char.flag.IN_AIR)))
+    if (isMighty())
     {
-        debugLog("reset state")
-        hammer_drop_state = 0
-        bouncy_ball_state = 0
+        if (char.base_state != base_state.NORMAL || !(char.flags & char.flag.IN_AIR))
+        {
+            hammer_drop_state = 0
+            bouncy_ball_state = 0
+            wall_cling = 0
+            cling_timer = 0
+        }
     }
     base.Character.BaseUpdate.Sonic()
 }
 
 function void Character.updateJumpMoves()
 {
-    if (!is_mighty)
+    if (!isMighty())
     {
         base.Character.updateJumpMoves()
         return
@@ -35,11 +48,25 @@ function void Character.updateJumpMoves()
     char.bonus_effect = bonus_effect_temp
     sonic.dropdash_counter = 0
 
-    if (!hammer_drop_state && (control.pad1.state & CONTROL_ABC))
+    if (!wall_cling && cling_timer)
     {
-        bouncy_ball_state = max(bouncy_ball_state, 1)
+        cling_timer++
+        cling_timer &= 0x1f
     }
-    else if (bouncy_ball_state && !(control.pad1.state & CONTROL_ABC))
+    
+    if (!hammer_drop_state)
+    {
+        if (control.pad1.state & CONTROL_ABC)
+        {
+            bouncy_ball_state = max(bouncy_ball_state, 1)
+        }
+        if ((control.pad1.pressed & CONTROL_ABC) && !wall_cling)
+        {
+            cling_timer = 1
+        }
+    }
+    
+    if (bouncy_ball_state && !(control.pad1.state & CONTROL_ABC))
     {
         bouncy_ball_state = 0
     }
@@ -47,7 +74,7 @@ function void Character.updateJumpMoves()
 
 function void SonicPressedJumpInMidAir()
 {
-    if (!is_mighty)
+    if (!isMighty())
     {
         base.SonicPressedJumpInMidAir()
         return
@@ -61,7 +88,6 @@ function void SonicPressedJumpInMidAir()
     u8[0xffffcce8 + 0x20] = shield_state_temp
     if (control.pad1.state & CONTROL_DOWN)
     {
-        debugLog("A")
         hammer_drop_state = 1
         bouncy_ball_state = 0
     }
@@ -79,7 +105,7 @@ function void Character.UpdateSonicRollingInAir()
 function void Character.UpdateControlInAir()
 {
     base.Character.UpdateControlInAir()
-    if (!is_mighty)
+    if (!isMighty())
     {
         return
     }
@@ -101,11 +127,16 @@ function void Character.UpdateControlInAir()
 function void Character.LandingOnGroundResetState()
 {
     base.Character.LandingOnGroundResetState()
+    if (!isMighty())
+        return
+    
     if (hammer_drop_state || bouncy_ball_state)
     {
         // camera.screenshake.state = 0x14 - This doesn't work, don't know why
         mightyBounce()
         hammer_drop_state = 0
+        wall_cling = 0
+        cling_timer = 0
     }
 }
 
@@ -124,19 +155,22 @@ function void mightyBounce()
     s16 vy = mainchar.groundhit.velocity.y
     u8 moveAngle = lookupAngleByVector(vx, vy)
     u8 groundAngle = char.rotation
-    u8 reflectedAngle = 0
+    u8 reflected_angle = 0
     u8 slide = 0
-    if (char.rotation <= 0x20 || char.rotation >= 0xe0)
+    debugLog(char.rotation)
+    if (char.rotation <= 0x28 || char.rotation >= 0xd0)
     {
-        reflectedAngle = groundAngle * 2 - moveAngle
+        reflected_angle = groundAngle * 2 - moveAngle
     }
     else
     {
         debugLog("slide")
         slide = 1
-        reflectedAngle = groundAngle
+        reflected_angle = groundAngle
+        if (hammer_drop_state)
+            reflected_angle += 0x80
     }
-    debugLog(reflectedAngle)
+    //debugLog(reflected_angle)
     
     if (bouncy_ball_state)
     {
@@ -151,34 +185,41 @@ function void mightyBounce()
     else if (bouncy_ball_state)
     {
         force = sqrt(square(u32(abs(char.velocity.x))) + square(u32(abs(char.velocity.y))))
-        debugLog(stringformat("force = 0x%x", force))
+        //debugLog(stringformat("force = 0x%x", force))
         force += 0x80 * (bouncy_ball_state - 1)
-        force = clamp(force, 0x600, 0x900)
+        force = clamp(force, 0x600, 0xa00)
     }
 
     if (hammer_drop_state || slide)
     {
-        char.velocity.x = (s32(lookupCos(reflectedAngle)) * force) >> 8
-        char.velocity.y = (s32(lookupSin(reflectedAngle)) * force) >> 8
+        if (slide)
+        {
+            force += force >> 2
+            if (hammer_drop_state)
+                reflected_angle += 0x80
+        }
+            
+        char.velocity.x = (s32(lookupCos(reflected_angle)) * force) >> 8
+        char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
     }
     else if (bouncy_ball_state)
     {
         //char.velocity.y = -0x480 - 0x40 * (bouncy_ball_state - 1)
         //char.velcity.y = min(char.velocity.y, -0x600)
-        char.velocity.y = (s32(lookupSin(reflectedAngle)) * force) >> 8
+        char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
         char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 1)
-        char.velocity.x = (s32(lookupCos(reflectedAngle)) > 0) ? char.velocity.x : -char.velocity.x
+        char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
         char.velocity.x = clamp(char.velocity.x, -0x800, 0x800)
     }
 
-    debugLog(char.velocity.x)
-    debugLog(char.velocity.y)
+    //debugLog(char.velocity.x)
+    //debugLog(char.velocity.y)
 
     char.state = char.state.ROLLING
     char.flags |= char.flag.ROLLING
     playSound(0x49)
-    debugLog(stringformat("char.rotation = 0x%x", char.rotation))
-    if (char.rotation <= 0x40 || char.rotation >= 0xc0)
+    //debugLog(stringformat("char.rotation = 0x%x", char.rotation))
+    if (!slide)
     {
         char.flags |= char.flag.IN_AIR
         char.flags &= ~char.flag.PUSHING
@@ -190,4 +231,83 @@ function void mightyBounce()
         s8 dy = char.hitbox_extends.y - char.hitbox.default.y
         char.position.y.u16 += (global.inv_gravity) ? dy : -dy
     }
+}
+
+//# address-hook(0x00ffd4) end(0x010214)
+function void Character.OnCollisionWithDynamicObject()
+{
+    s16 velocity_temp = char.velocity.y
+    base.Character.OnCollisionWithDynamicObject()
+    if (hammer_drop_state && char.base_state != base_state.HURT)
+    {
+        // Prevent the character's fall from being interrupted during hammer drop.
+        char.velocity.y = velocity_temp
+    }
+}
+
+//# address-hook(0x011eec) end(0x011fd4)
+//# translated(0x012012) end(0x01209c)
+//# translated(0x01209e) end(0x012100)
+//# translated(0x012102) end(0x012170)
+//# address-hook(0x0153c2) end(0x01560a)
+function void Character.CheckCollision()
+{
+    if (!isMighty())
+    {
+        base.Character.CheckCollision()
+        return
+    }
+    
+    if (cling_timer && char.base_state == base_state.NORMAL)
+    {
+        D5.u8 = char.layer_flags2
+        s16 left_collision = 0
+        s16 right_collision = 0
+        if (char.velocity.x > 0)
+        {
+            Character.CheckRightWallCollision()
+            right_collision = D1.s16
+            if (D1.s16 < 0)
+            {
+                wall_cling = 1
+                cling_timer = 0
+            }
+                
+        }
+            
+        else if (char.velocity.x < 0)
+        {
+            Character.CheckLeftWallCollision()
+            left_collision = D1.s16
+                if (D1.s16 < 0)
+                {
+                    wall_cling = 2
+                    cling_timer = 0
+                }
+        }
+    }
+    base.Character.CheckCollision()
+    if (wall_cling == 1 || wall_cling == 2)
+    {
+        char.velocity.x = 0
+        char.velocity.y = 0
+    }
+}
+
+//# address-hook(0x011036) end(0x01105e)
+function void Character.UpdateSonicRollingInAir()
+{
+    if (isMighty() && wall_cling)
+    {
+        if (control.player1.pressed & CONTROL_ABC)
+        {
+            debugLog("wall jump")
+            char.velocity.y = -0x680
+            char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
+            wall_cling = 0
+            char.jumping = 1
+        }
+        return
+    }
+    base.Character.UpdateSonicRollingInAir()
 }
