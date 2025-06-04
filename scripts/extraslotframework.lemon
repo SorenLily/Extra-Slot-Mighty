@@ -36,7 +36,6 @@ function void DataSelect.setup()
 		}
 	}
 	save_slot_data = u64[buffer_address + 1]
-	debugLog(stringformat("save_slot_data = 0x%x", save_slot_data))
 	u8[buffer_address] = 0
 	u64[buffer_address + 1] = 0
 	base.DataSelect.setup()
@@ -72,18 +71,17 @@ function void fn00d1fa()
 //# address-hook(0x00d39e) end(0x00d426)
 function void fn00d39e()
 {
+	u32 address = 0xffffe6ac + (u32(objA0.flags2e) * 10)
 	base.fn00d39e()
 	u32 buffer_address = getEmptyBuffer(8)
 	u64[buffer_address] = save_slot_data
 
-	u8 slot_data = objA0.flags2e
 	if (u8[buffer_address + objA0.flags2e] >= 1)
 	{
 		debugLog("Adjust save slot char on init")
-		debugLog(u8[A0 + 0x35])
 		u8[A0 + 0x35] = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
-		debugLog(u8[A0 + 0x35])
 	}
+	u64[buffer_address] = 0
 }
 
 // dataselect_slot.update()
@@ -93,14 +91,12 @@ function void fn00d42c()
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3
 	base.fn00d42c()
-	debugLog(u8[A0 + 0x35])
 	if (filler_byte_temp != u8[A1 + 0x01] && u8[A0 + 0x35] > max_characters)
 	{
 		debugLog("New game started as Mighty")
 		levelselect.characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
-		debugLog(levelselect.characters)
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | 0x10
-		debugLog(u8[A1 + 0x02])
+		SaveGameSlot()
 	}
 }
 
@@ -115,29 +111,29 @@ function bool fn00d458()
 		debugLog("Save extra persistent data")
 		// Compute address of extra save slot data.
 
-		u32 address = getEmptyBuffer(1)
+		u32 buffer_address = getEmptyBuffer(1)
 		for (u8 i = 0; i < 8; i++)
 		{
-			u8[address] |= ((u8[0xffffb128 + 0x35 + 0x4a*i] > max_characters) ? 1 : 0) << i
+			u8[buffer_address] |= ((u8[0xffffb128 + 0x35 + 0x4a*i] > max_characters) ? 1 : 0) << i
 		}
-		debugLog(u8[address])
-		System.savePersistentData(address, (CHAR_KEY + "_save_data"), 1)
+		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		is_mighty = 1
-		u8[address] = 0
+		u8[buffer_address] = 0
 	}
 	else if (result == 0)
 	{
 		debugLog("Load extra persistent data")
 		// Compute address of extra save slot data.
-		u32 address = getEmptyBuffer(1)
+		u32 buffer_address = getEmptyBuffer(1)
+		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 		// Check extra save slot data to see if this is a Mighty save.
-		if (u8[address] & (1 << slot_index))
+		if (u8[buffer_address] & (1 << slot_index))
 		{
-			levelselect.characters = (max_characters + 2) - u8[0xffffb128 + 0x35 + 0x4a*slot_index]
-			debugLog(levelselect.characters)
+			levelselect.characters = (max_characters + 2) - u8[A0 + 0x35]
 			is_mighty = 1
 		}
+		u8[buffer_address] = 0
 	}
 	return result
 }
@@ -228,15 +224,17 @@ function void fn00d8c4()
 		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		u8[buffer_address] &= ~(1 << slot_index)
 		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+		u8[buffer_address] = 0
 	}
 }
 
 ///////////////////////////////
 ///	  CHARACTER RENDERING	///
 ///////////////////////////////
+
 function string getCharacterPaletteKey(u8 character)
 {
-	if (is_mighty)
+	if (is_mighty && character == CHARACTER_SONIC)
 	{
 		return "mighty_palette"
 	}
