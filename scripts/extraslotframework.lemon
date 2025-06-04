@@ -241,13 +241,31 @@ function string getCharacterPaletteKey(u8 character)
 	return base.getCharacterPaletteKey(character)
 }
 
+function string getCharacterBluesphereSpriteKey(u8 character)
+{
+	if (is_mighty && character == CHARACTER_SONIC)
+	{
+		return "bluesphere_mighty"
+	}
+	return base.getCharacterBluesphereSpriteKey(character)
+}
+
+function string getCharacterBluespherePaletteKey(u8 character)
+{
+	if (is_mighty && character == CHARACTER_SONIC)
+	{
+		return "mightyBS_palette"
+	}
+	return base.getCharacterBluespherePaletteKey(character)
+}
+
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
 	if (objA0.update_address == 0x010a94 && is_mighty && character == CHARACTER_SONIC)
 	{
 		if (u8[0xffffb020] == char.state.WIN_POSE)
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
-			
+
 		u8 index = getCharSpriteIndex()
 		string str = stringformat("character_mighty_0x%02x", index)
 		return str
