@@ -1,10 +1,44 @@
 global bool is_mighty
+global u64 save_slot_data
+
+function u32 getEmptyBuffer(u32 bytes)
+{
+	// Find an empty buffer in shared memory to store data.
+	// 0x820000 will almost certainly be empty, but just to be safe.
+	u32 buffer_address = 0x820000
+	u32 data = 0
+	u8 i = 0
+	while (i < bytes)
+	{
+		data = u32[buffer_address + i]
+		i += 4
+		if (data != 0)
+		{
+			buffer_address += i
+			i = 0
+		}
+	}
+	return buffer_address
+}
 
 function void DataSelect.setup()
 {
 	// This needs to be cleared if the player starts a game and then exits back to the main menu.
 	// There are other places to put this, but I think here makes sense.
 	is_mighty = 0
+	u32 buffer_address = getEmptyBuffer(9)
+	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+	for (u8 i = 0; i < 8; i++)
+	{
+		if (u8[buffer_address] & (1 << i))
+		{
+			u8[buffer_address + 1 + i] += 1
+		}
+	}
+	save_slot_data = u64[buffer_address + 1]
+	debugLog(stringformat("save_slot_data = 0x%x", save_slot_data))
+	u8[buffer_address] = 0
+	u64[buffer_address + 1] = 0
 	base.DataSelect.setup()
 }
 
@@ -39,11 +73,15 @@ function void fn00d1fa()
 function void fn00d39e()
 {
 	base.fn00d39e()
-	u32 address = 0x801100 + u32(objA0.flags2e) * 0x20
-	if (u8[address + 0x04] >= 1)
+	u32 buffer_address = getEmptyBuffer(8)
+	u64[buffer_address] = save_slot_data
+
+	u8 slot_data = objA0.flags2e
+	if (u8[buffer_address + objA0.flags2e] >= 1)
 	{
 		debugLog("Adjust save slot char on init")
-		u8[A0 + 0x35] = u8[address + 0x04]
+		debugLog(u8[A0 + 0x35])
+		u8[A0 + 0x35] = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
 		debugLog(u8[A0 + 0x35])
 	}
 }
@@ -53,11 +91,14 @@ function void fn00d39e()
 function void fn00d42c()
 {
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
+	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3
 	base.fn00d42c()
-	if (filler_byte_temp != u8[A1 + 0x01])
+	debugLog(u8[A0 + 0x35])
+	if (filler_byte_temp != u8[A1 + 0x01] && u8[A0 + 0x35] > max_characters)
 	{
-		debugLog("New game started")
+		debugLog("New game started as Mighty")
 		levelselect.characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
+		debugLog(levelselect.characters)
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | 0x10
 		debugLog(u8[A1 + 0x02])
 	}
@@ -65,7 +106,7 @@ function void fn00d42c()
 
 // THIS FUNCTION IS NOT A BOOL. Even though its signature says "bool", it can return 0, 1, or 2.
 function bool fn00d458()
-{	
+{
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
@@ -73,22 +114,27 @@ function bool fn00d458()
 	{
 		debugLog("Save extra persistent data")
 		// Compute address of extra save slot data.
-		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
-		u32 address = 0x801100 + slotIndex * 0x20
-		// Set an additional byte of data to record that this is a Mighty file.
-		u8[address + 0x04] = u8[A0 + 0x35]
+
+		u32 address = getEmptyBuffer(1)
+		for (u8 i = 0; i < 8; i++)
+		{
+			u8[address] |= ((u8[0xffffb128 + 0x35 + 0x4a*i] > max_characters) ? 1 : 0) << i
+		}
+		debugLog(u8[address])
+		System.savePersistentData(address, (CHAR_KEY + "_save_data"), 1)
 		is_mighty = 1
+		u8[address] = 0
 	}
 	else if (result == 0)
 	{
 		debugLog("Load extra persistent data")
 		// Compute address of extra save slot data.
-		u32 slotIndex = (A1 - 0xffffe6ac) / 0x0a
-		u32 address = 0x801100 + slotIndex * 0x20
+		u32 address = getEmptyBuffer(1)
+		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 		// Check extra save slot data to see if this is a Mighty save.
-		if (u8[address + 0x04] >= max_characters)
+		if (u8[address] & (1 << slot_index))
 		{
-			levelselect.characters = (max_characters + 2) - u8[address + 0x04]
+			levelselect.characters = (max_characters + 2) - u8[0xffffb128 + 0x35 + 0x4a*slot_index]
 			debugLog(levelselect.characters)
 			is_mighty = 1
 		}
@@ -99,6 +145,7 @@ function bool fn00d458()
 //# address-hook(0x00d6d0) end(0x00d70a)
 function void fn00d6d0()
 {
+	// Character Selection: Allow for selecting higher than the normal maximum character
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	if (D0.u16 >= max_characters)
 	{
@@ -115,7 +162,6 @@ function void fn00d6d0()
 	{
 		base.fn00d6d0()
 	}
-	debugLog(D0.u16)
 }
 
 function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 index, u16 renderQueue, u8 spriteCounter)
@@ -123,36 +169,34 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	if ((objA0.update_address == 0x00d30c || objA0.update_address == 0x00d42c) )//&& (u8[A0 + 0x35] > max_characters))
 	{
-		debugLog(index)
+		//debugLog(index)
 		if (u8[A0 + 0x35] > max_characters)
 		{
-		if (index == 0xa351 || index == 0xa35a)
-		{
-			if (index == 0xa35a)
+			if (index == 0xa351 || index == 0xa35a)
 			{
-				// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
-				u16 attributes = sprite_attribute.PRIORITY | sprite_attribute.PALETTE.LINE1 | sprite_attribute.FLIP_X
-				Renderer.drawVdpSprite(px+12, py+30, 0x00, attributes | 0x031d, renderQueue)
-				Renderer.drawVdpSprite(px+4,  py+38, 0x0d, attributes | 0x031e, renderQueue)
-				Renderer.drawVdpSprite(px+12, py+54, 0x0d, attributes | 0x0326, renderQueue)
-				Renderer.drawVdpSprite(px+4,  py+62, 0x00, attributes | 0x032e, renderQueue)
-				px -= 8
-			}
-			renderQueue++
-			SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (index == 0xa35a ? px+26 : px+8), py+35, renderQueue)
-			spr1.setFlipX(index == 0xa35a)
-			if (!(u8[u32[A0 + 0x30]] & 0x80))
-			{
-				SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+4, py+80, renderQueue)
-				SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
-				SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
-				SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+104, renderQueue)
-			}
-
-			return true
-		}	
+				if (index == 0xa35a)
+				{
+					// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
+					u16 attributes = sprite_attribute.PRIORITY | sprite_attribute.PALETTE.LINE1 | sprite_attribute.FLIP_X
+					Renderer.drawVdpSprite(px+12, py+30, 0x00, attributes | 0x031d, renderQueue)
+					Renderer.drawVdpSprite(px+4,  py+38, 0x0d, attributes | 0x031e, renderQueue)
+					Renderer.drawVdpSprite(px+12, py+54, 0x0d, attributes | 0x0326, renderQueue)
+					Renderer.drawVdpSprite(px+4,  py+62, 0x00, attributes | 0x032e, renderQueue)
+					px -= 8
+				}
+				renderQueue++
+				SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (index == 0xa35a ? px+26 : px+8), py+35, renderQueue)
+				spr1.setFlipX(index == 0xa35a)
+				if (!(u8[u32[A0 + 0x30]] & 0x80))
+				{
+					SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+4, py+80, renderQueue)
+					SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
+					SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
+					SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+104, renderQueue)
+				}
+				return true
+			}	
 		}
-		
 	}
 	return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 }
@@ -163,11 +207,28 @@ function void fn001506()
 	{
 		if (u8[A3 + 0x35] > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
 		{
-			// Prevent the life and continue icons from being drawn on this slot object.
+			// Prevent the life and continue icons from being drawn on this save slot object.
 			return
 		}
 	}
 	base.fn001506()
+}
+
+//# address-hook(0x00d8c4) end(0x00d90c)
+function void fn00d8c4()
+{
+	u16 data_temp = u16[A1]
+	base.fn00d8c4()
+	if (u16[A1] == 0x8000 && data_temp != 0x8000)
+	{
+		// Clear the flag that this is a mighty save slot from persistentdata.
+		debugLog("Clear Data")
+		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
+		u32 buffer_address = getEmptyBuffer(1)
+		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+		u8[buffer_address] &= ~(1 << slot_index)
+		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+	}
 }
 
 ///////////////////////////////
@@ -189,7 +250,6 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		//bool result = Standalone.drawCharacterSprite(char.character, 0, px, py, false)
 		u8 index = getCharSpriteIndex()
 		string str = stringformat("character_mighty_0x%02x", index)
-		debugLog(str)
 		if (str != "character_mighty_0x00")
 		{
 			SpriteHandle spr = Renderer.addSpriteHandle(str, px, py, renderQueue)
@@ -197,7 +257,6 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 			spr.setPriorityFlag(char.sprite_priority & sprite_attribute.PRIORITY)
 			return true
 		}
-		
 	}
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
 }
