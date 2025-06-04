@@ -4,6 +4,13 @@ global u8 wall_cling
 global u8 cling_timer
 global u8 block_spikes
 
+global u8 mighty_wp_index
+global u8 mighty_wp_frame
+global u8 mighty_wp_timer
+
+constant array<u8> MIGHTY_WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
+constant array<u8> MIGHTY_WP_OFFSETS = {0, 3, 4, 4, 0, 4, 5, 6, 0, 0}
+
 // Helper function
 function bool isMighty()
 {
@@ -16,6 +23,19 @@ function u32 square(u32 x)
     return (x * x)
 }
 
+function void MWinPose()
+{
+    ++mighty_wp_timer      // Increment timer each frame
+    if (mighty_wp_timer == MIGHTY_WP_TIMES[mighty_wp_frame])
+		char.position.x.u16 += MIGHTY_WP_OFFSETS[mighty_wp_frame] * (char.flag.FACING_LEFT ? -1 : 1)
+
+    if (mighty_wp_timer >= MIGHTY_WP_TIMES[mighty_wp_frame])
+        mighty_wp_frame = min(mighty_wp_frame + 1, 9)
+
+    if (mighty_wp_timer >= MIGHTY_WP_TIMES[9] + MIGHTY_WP_TIMES[0])               // Loop timer within animation length
+		mighty_wp_timer = MIGHTY_WP_TIMES[8]
+}
+
 function void Character.Initialization.shared(u8 character)
 {
     hammer_drop_state = 0
@@ -23,6 +43,9 @@ function void Character.Initialization.shared(u8 character)
     wall_cling = 0
     cling_timer = 0
     block_spikes = 0
+    mighty_wp_index = 0
+    mighty_wp_frame = 0
+    mighty_wp_timer = 0
     base.Character.Initialization.shared(character)
 }
 
@@ -40,6 +63,15 @@ function void Character.BaseUpdate.Sonic()
         }
     }
     base.Character.BaseUpdate.Sonic()
+    if (isMighty() && char.state == char.state.WIN_POSE)
+    {
+        MWinPose()
+    }
+	else
+	{
+        mighty_wp_timer = 0     // Reset when not in win-pose
+        mighty_wp_frame = 0
+	}
 }
 
 function void Character.updateJumpMoves()
