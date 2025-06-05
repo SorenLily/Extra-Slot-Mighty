@@ -261,10 +261,12 @@ function string getCharacterBluespherePaletteKey(u8 character)
 
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
-	if (objA0.update_address == 0x010a94 && is_mighty && character == CHARACTER_SONIC)
+	if (objA0.update_address == 0x010a94 && is_mighty)
 	{
 		if (u8[0xffffb020] == char.state.WIN_POSE)
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
+		else if (wall_cling)
+			return "mighty_grab_wall"
 
 		u8 index = getCharSpriteIndex()
 		string str = stringformat("character_mighty_0x%02x", index)
