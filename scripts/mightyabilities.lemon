@@ -1,4 +1,5 @@
 global u16 hammer_drop_state
+global u8 hammer_drop_rebound
 global u8 bouncy_ball_state
 global u8 wall_cling
 global u8 cling_timer
@@ -25,6 +26,7 @@ function u32 square(u32 x)
 function void Character.Initialization.shared(u8 character)
 {
     hammer_drop_state = 0
+    hammer_drop_rebound = 0
     bouncy_ball_state = 0
     wall_cling = 0
     cling_timer = 0
@@ -42,6 +44,7 @@ function void Character.BaseUpdate.Sonic()
         if (char.base_state != base_state.NORMAL || !(char.flags & char.flag.IN_AIR))
         {
             hammer_drop_state = 0
+            hammer_drop_rebound = 0
             bouncy_ball_state = 0
             wall_cling = 0
             cling_timer = 0
@@ -192,12 +195,14 @@ function void Character.UpdateControlInAir()
     }
 
 
-    if (hammer_drop_state >= 1)
+    if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
         char.velocity.y = clamp(char.velocity.y + 0xc0, 0, 0x1000)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
+    if (hammer_drop_rebound)
+        hammer_drop_rebound--
 }
 
 function void Character.LandingOnGroundResetState()
@@ -210,6 +215,7 @@ function void Character.LandingOnGroundResetState()
     {
         // Bounce off the ground, and reset states.
         mightyBounce()
+        hammer_drop_rebound = hammer_drop_state ? 5 : 0
         hammer_drop_state = 0
         wall_cling = 0
         cling_timer = 0

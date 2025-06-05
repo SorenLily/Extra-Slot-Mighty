@@ -1,0 +1,82 @@
+function string getCharacterPaletteKey(u8 character)
+{
+	if (is_mighty && character == CHARACTER_SONIC)
+	{
+		return "mighty_palette"
+	}
+	return base.getCharacterPaletteKey(character)
+}
+
+function string getCharacterBluesphereSpriteKey(u8 character)
+{
+	if (is_mighty && character == CHARACTER_SONIC)
+	{
+		return "bluesphere_mighty"
+	}
+	return base.getCharacterBluesphereSpriteKey(character)
+}
+
+function string getCharacterBluespherePaletteKey(u8 character)
+{
+	if (is_mighty && character == CHARACTER_SONIC)
+	{
+		return "mightyBS_palette"
+	}
+	return base.getCharacterBluespherePaletteKey(character)
+}
+
+function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
+{
+	if (objA0.update_address == 0x010a94 && is_mighty)
+	{
+		if (char.state == char.state.WIN_POSE)
+			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
+		else if (wall_cling)
+			return "mighty_grab_wall"
+		else if (hammer_drop_rebound)
+		{
+			if (hammer_drop_rebound == 5)
+				return "mighty_hammer_drop_0x01"
+			else
+			{
+				char.render_flags ^= render_flag.FLIP_Y
+				return "mighty_hammer_drop_0x00"
+			}
+		}
+		else if (hammer_drop_state)
+		{
+			if (hammer_drop_state <= 2)
+				return "mighty_hammer_drop_0x00"
+			else if (hammer_drop_state <= 4)
+				return "mighty_hammer_drop_0x01"
+			else if (hammer_drop_state)
+				return (stringformat("mighty_hammer_drop_0x%02x", ((((hammer_drop_state - 4) % 12) / 3) + 2)))
+		}
+		else
+			return stringformat("character_mighty_0x%02x", getCharSpriteIndex())
+	}
+	u64 result = base.Standalone.getModdedAnimationSpriteKey(character, animationSpriteEx)
+	debugLog(result)
+	return result
+}
+
+function u8 getCharSpriteIndex()
+{
+	u8 animationSprite = char.animation.sprite
+	if (animationSprite >= 0x01 && animationSprite <= 0x20)
+	{
+		// Walking animation
+		animationSprite = 0x01 + (animationSprite - 0x01) % 8
+	}
+	else if (animationSprite >= 0x21 && animationSprite <= 0x30)
+	{
+		// Running animation
+		animationSprite = 0x21 + (animationSprite - 0x21) % 4
+	}
+	else if (animationSprite >= 0x78 && animationSprite <= 0x7f)
+	{
+		// Swinging animation
+		animationSprite = 0x78
+	}
+	return animationSprite
+}

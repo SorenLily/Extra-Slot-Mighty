@@ -1,5 +1,6 @@
 //# script-feature-level(2)
 include extraslotframework
+include rendercharacter
 include mightyabilities
 
 constant string CHAR_KEY = "Mighty"
