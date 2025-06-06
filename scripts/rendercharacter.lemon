@@ -33,9 +33,9 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
 		else if (wall_cling)
 			return "mighty_grab_wall"
-		else if (hammer_drop_rebound)
+		else if (hammer_drop_rebound >= 7)
 		{
-			if (hammer_drop_rebound == 5)
+			if (hammer_drop_rebound == 12)
 				return "mighty_hammer_drop_0x01"
 			else
 			{
@@ -45,19 +45,21 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		}
 		else if (hammer_drop_state)
 		{
+            string str = "mighty_hammer_drop_"
+            if (hammer_drop_diagonal)
+                str += "45_"
 			if (hammer_drop_state <= 2)
-				return "mighty_hammer_drop_0x00"
+				str += "0x00"
 			else if (hammer_drop_state <= 4)
-				return "mighty_hammer_drop_0x01"
+				str += "0x01"
 			else if (hammer_drop_state)
-				return (stringformat("mighty_hammer_drop_0x%02x", ((((hammer_drop_state - 4) % 12) / 3) + 2)))
+				str += (stringformat("0x%02x", ((((hammer_drop_state - 4) % 12) / 3) + 2)))
+            return str
 		}
 		else
 			return stringformat("character_mighty_0x%02x", getCharSpriteIndex())
 	}
-	u64 result = base.Standalone.getModdedAnimationSpriteKey(character, animationSpriteEx)
-	debugLog(result)
-	return result
+	return base.Standalone.getModdedAnimationSpriteKey(character, animationSpriteEx)
 }
 
 function u8 getCharSpriteIndex()

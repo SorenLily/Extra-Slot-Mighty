@@ -1,4 +1,5 @@
 global u16 hammer_drop_state
+global s8 hammer_drop_diagonal
 global u8 hammer_drop_rebound
 global u8 bouncy_ball_state
 global u8 wall_cling
@@ -8,8 +9,9 @@ global u8 block_spikes
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
 
+global bool supress_sfx
+
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
-constant array<u8> WP_OFFSETS = {0, 3, 4, 4, 0, 4, 5, 6, 0, 0}
 
 // Helper function
 function bool isMighty()
@@ -23,9 +25,17 @@ function u32 square(u32 x)
     return (x * x)
 }
 
+function void playSound(u8 soundId)
+{
+    if (supress_sfx)
+        return
+    base.playSound(soundId)
+}
+
 function void Character.Initialization.shared(u8 character)
 {
     hammer_drop_state = 0
+    hammer_drop_diagonal = 0
     hammer_drop_rebound = 0
     bouncy_ball_state = 0
     wall_cling = 0
@@ -44,6 +54,7 @@ function void Character.BaseUpdate.Sonic()
         if (char.base_state != base_state.NORMAL || !(char.flags & char.flag.IN_AIR))
         {
             hammer_drop_state = 0
+            hammer_drop_diagonal = 0
             hammer_drop_rebound = 0
             bouncy_ball_state = 0
             wall_cling = 0
@@ -53,13 +64,8 @@ function void Character.BaseUpdate.Sonic()
     base.Character.BaseUpdate.Sonic()
     if (isMighty() && char.state == char.state.WIN_POSE)
     {
-        // Play the custom win pose animation.
+        // Advance the custom win pose animation.
         ++mighty_wp_timer
-        // Nudge Mighty whenever we move to a new animation frame to produce movement.
-
-        //if (mighty_wp_timer == WP_TIMES[mighty_wp_frame])
-        //    char.position.x.u16 += WP_OFFSETS[mighty_wp_frame] * (char.flag.FACING_LEFT ? -1 : 1)
-
         // Advance to a new animation frame when the timer reaches the values in the list.
         if (mighty_wp_timer >= WP_TIMES[mighty_wp_frame])
             mighty_wp_frame = min(mighty_wp_frame + 1, 9)
@@ -131,15 +137,22 @@ function void SonicPressedJumpInMidAir()
     u8 super_temp = super.active
     u8 shield_state_temp = u8[0xffffcce8 + 0x20]
     super.active = 0
+    supress_sfx = true
     base.SonicPressedJumpInMidAir()
+    supress_sfx = false
     super.active = super_temp
     u8[0xffffcce8 + 0x20] = shield_state_temp
 
     if (control.pad1.state & CONTROL_DOWN)
     {
         // Start hammer drop.
-        hammer_drop_state = 1
+        if (!hammer_drop_rebound)
+            hammer_drop_state = 1
         bouncy_ball_state = 0
+        if (control.pad1.state & CONTROL_LEFT)
+            hammer_drop_diagonal = -1
+        else if (control.pad1.state & CONTROL_RIGHT)
+            hammer_drop_diagonal = 1
     }
 }
 
@@ -172,33 +185,29 @@ function void Character.UpdateControlInAir()
         }
         if (control.player1.state & CONTROL_LEFT)
         {
-            debugLog("adjust left")
-            char.velocity.x -= acceleration
+            char.velocity.x -= acceleration >> 1
         }
         else if (control.player1.state & CONTROL_RIGHT)
         {
-            debugLog("adjust right")
-            char.velocity.x += acceleration
+            char.velocity.x += acceleration >> 1
         }
 
         if (control.player1.state & CONTROL_UP)
         {
-            debugLog("adjust up")
             char.velocity.y -= acceleration >> 1
         }
         else if (control.player1.state & CONTROL_DOWN)
         {
-            debugLog("adjust down")
             char.velocity.y += acceleration >> 1
         }
         centerCameraYOffset()
     }
 
-
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
-        char.velocity.y = clamp(char.velocity.y + 0xc0, 0, 0x1000)
+        char.velocity.y = clamp(char.velocity.y + (hammer_drop_diagonal ? 0x78 : 0xc0), 0, 0x1000)
+        char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_diagonal, -0x800, 0x800)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
     if (hammer_drop_rebound)
@@ -215,8 +224,9 @@ function void Character.LandingOnGroundResetState()
     {
         // Bounce off the ground, and reset states.
         mightyBounce()
-        hammer_drop_rebound = hammer_drop_state ? 5 : 0
+        hammer_drop_rebound = hammer_drop_state ? 12 : 0
         hammer_drop_state = 0
+        hammer_drop_diagonal = 0
         wall_cling = 0
         cling_timer = 0
     }
@@ -298,7 +308,14 @@ function void mightyBounce()
 
     char.state = char.state.ROLLING
     char.flags |= char.flag.ROLLING
-    playSound(0x49)
+    if (hammer_drop_state)
+    {
+        playSound(0x5f)
+    }
+    else
+    {
+        playSound(0x49)
+    }
     //debugLog(stringformat("char.rotation = 0x%x", char.rotation))
     if (!slide)
     {
@@ -358,14 +375,13 @@ function void Character.CheckCollision()
 
     if (cling_timer && char.base_state == base_state.NORMAL)
     {
+        debugLog("collision check")
         D5.u8 = char.layer_flags2
-        s16 left_collision = 0
-        s16 right_collision = 0
         if (char.velocity.x > 0)
         {
             Character.CheckRightWallCollision()
-            right_collision = D1.s16
-            if (D1.s16 < 0)
+            debugLog(D3.u8)
+            if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
             {
                 wall_cling = 1
                 cling_timer = 0
@@ -375,8 +391,8 @@ function void Character.CheckCollision()
         else if (char.velocity.x < 0)
         {
             Character.CheckLeftWallCollision()
-            left_collision = D1.s16
-                if (D1.s16 < 0)
+            debugLog(D3.u8)
+                if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
                 {
                     wall_cling = 2
                     cling_timer = 0
@@ -388,6 +404,7 @@ function void Character.CheckCollision()
     {
         char.velocity.x = 0
         char.velocity.y = 0
+        playSound(SFX_GRAB)
     }
 }
 
@@ -427,7 +444,6 @@ function void Spikes.Update()
     {
         block_spikes = 0
     }
-        
 }
 
 //# address-hook(0x0240e2) end(0x024138)
@@ -479,8 +495,9 @@ function void Character.GettingHurt()
 function void Character.HurtCheckForStateChange()
 {
     base.Character.HurtCheckForStateChange()
-    if (char.base_state == base_state.NORMAL)
+    if (isMighty() && char.base_state == base_state.NORMAL && block_spikes == 3)
     {
         char.invuln.countdown = 30
+        block_spikes = 0
     }
 }
