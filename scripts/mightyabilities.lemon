@@ -1,13 +1,20 @@
 global u16 hammer_drop_state
-global s8 hammer_drop_diagonal
+// Left = -1, Down = 0, Right = 1
+global s8 hammer_drop_direction
+// Used for animation after bouncing from hammer_drop, and as the cooldown of hammer_drop.
 global u8 hammer_drop_rebound
 global u8 bouncy_ball_state
 global u8 wall_cling
+global u8 wall_spin
+// Timer that allows clinging to walls.
 global u8 cling_timer
+// State for blocking spike collisions.
 global u8 block_spikes
 
+// Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
+global u8 waiting_for_win_pose
 
 global bool supress_sfx
 
@@ -34,8 +41,9 @@ function void playSound(u8 soundId)
 
 function void Character.Initialization.shared(u8 character)
 {
+    // Reset global state on initialization.
     hammer_drop_state = 0
-    hammer_drop_diagonal = 0
+    hammer_drop_direction = 0
     hammer_drop_rebound = 0
     bouncy_ball_state = 0
     wall_cling = 0
@@ -49,36 +57,24 @@ function void Character.Initialization.shared(u8 character)
 //# address-hook(0x010a94) end(0x010ae8)
 function void Character.BaseUpdate.Sonic()
 {
-    if (isMighty())
+    if (!isMighty())
     {
-        if (char.base_state != base_state.NORMAL || !(char.flags & char.flag.IN_AIR))
-        {
-            hammer_drop_state = 0
-            hammer_drop_diagonal = 0
-            hammer_drop_rebound = 0
-            bouncy_ball_state = 0
-            wall_cling = 0
-            cling_timer = 0
-        }
+        base.Character.BaseUpdate.Sonic()
+        return
+    }
+
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR))
+    {
+        // Reset all ability states.
+        hammer_drop_state = 0
+        hammer_drop_direction = 0
+        hammer_drop_rebound = 0
+        bouncy_ball_state = 0
+        wall_cling = 0
+        cling_timer = 0
     }
     base.Character.BaseUpdate.Sonic()
-    if (isMighty() && char.state == char.state.WIN_POSE)
-    {
-        // Advance the custom win pose animation.
-        ++mighty_wp_timer
-        // Advance to a new animation frame when the timer reaches the values in the list.
-        if (mighty_wp_timer >= WP_TIMES[mighty_wp_frame])
-            mighty_wp_frame = min(mighty_wp_frame + 1, 9)
-        // Loop timer within animation length (?)
-        if (mighty_wp_timer >= WP_TIMES[9] + WP_TIMES[0])
-            mighty_wp_timer = WP_TIMES[8]
-    }
-	else
-	{
-        // Reset when not in win-pose
-        mighty_wp_timer = 0
-        mighty_wp_frame = 0
-	}
+    updateWinPose()
 }
 
 function void Character.updateJumpMoves()
@@ -95,6 +91,8 @@ function void Character.updateJumpMoves()
     base.Character.updateJumpMoves()
     char.bonus_effect = bonus_effect_temp
     sonic.dropdash_counter = 0
+    // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
+    char.double_jump_state = 0
 
     // If not clinging to a wall, and allowed to start clinging...
     if (!wall_cling && cling_timer)
@@ -133,7 +131,7 @@ function void SonicPressedJumpInMidAir()
         return
     }
 
-    // Disable Super Sonic's air-dash and the Insta-shield's graphic (TODO: the latter doesn't really work).
+    // Disable Super Sonic's air-dash and the Insta-shield's graphic.
     u8 super_temp = super.active
     u8 shield_state_temp = u8[0xffffcce8 + 0x20]
     super.active = 0
@@ -150,16 +148,10 @@ function void SonicPressedJumpInMidAir()
             hammer_drop_state = 1
         bouncy_ball_state = 0
         if (control.pad1.state & CONTROL_LEFT)
-            hammer_drop_diagonal = -1
+            hammer_drop_direction = -1
         else if (control.pad1.state & CONTROL_RIGHT)
-            hammer_drop_diagonal = 1
+            hammer_drop_direction = 1
     }
-}
-
-//# address-hook(0x011036) end(0x01105e)
-function void Character.UpdateSonicRollingInAir()
-{
-    base.Character.UpdateSonicRollingInAir()
 }
 
 //# address-hook(0x01164e) end(0x0116dc)
@@ -183,6 +175,7 @@ function void Character.UpdateControlInAir()
             // Undo the air drag.
             char.velocity.x += (char.velocity.x >> 5) + (char.velocity.x >> 10)
         }
+        // Allow extra acceleration during bouncy ball while pressing directions.
         if (control.player1.state & CONTROL_LEFT)
         {
             char.velocity.x -= acceleration >> 1
@@ -206,8 +199,8 @@ function void Character.UpdateControlInAir()
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
-        char.velocity.y = clamp(char.velocity.y + (hammer_drop_diagonal ? 0x78 : 0xc0), 0, 0x1000)
-        char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_diagonal, -0x800, 0x800)
+        char.velocity.y = clamp(char.velocity.y + (hammer_drop_direction ? 0x78 : 0xc0), 0, 0x1000)
+        char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
     if (hammer_drop_rebound)
@@ -222,11 +215,16 @@ function void Character.LandingOnGroundResetState()
     
     if (hammer_drop_state || bouncy_ball_state)
     {
-        // Bounce off the ground, and reset states.
-        mightyBounce()
+        // Bounce off the ground.
+        if (!waiting_for_win_pose)
+        {
+            mightyBounce()
+        }
+        // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
         hammer_drop_rebound = hammer_drop_state ? 12 : 0
+        // Reset states.
         hammer_drop_state = 0
-        hammer_drop_diagonal = 0
+        hammer_drop_direction = 0
         wall_cling = 0
         cling_timer = 0
     }
@@ -243,7 +241,6 @@ function void mightyBounce()
     u8 groundAngle = char.rotation
     u8 reflected_angle = 0
     u8 slide = 0
-    debugLog(char.rotation)
     if (char.rotation <= 0x28 || char.rotation >= 0xd0)
     {
         reflected_angle = groundAngle * 2 - moveAngle
@@ -270,10 +267,9 @@ function void mightyBounce()
     }
     else if (bouncy_ball_state)
     {
-        force = sqrt(square(u32(abs(char.velocity.x))) + square(u32(abs(char.velocity.y))))
-        //debugLog(stringformat("force = 0x%x", force))
+        force = sqrt(square(s32(abs(char.velocity.x))) + square(s32(abs(char.velocity.y))))
         force += 0x80 * (bouncy_ball_state - 1)
-        force = clamp(force, 0x600, 0xa00)
+        force = clamp(force, 0x600, 0xc00)
     }
 
     if (hammer_drop_state || slide)
@@ -290,8 +286,6 @@ function void mightyBounce()
     }
     else if (bouncy_ball_state)
     {
-        //char.velocity.y = -0x480 - 0x40 * (bouncy_ball_state - 1)
-        //char.velcity.y = min(char.velocity.y, -0x600)
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
         char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 1)
         char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
@@ -334,21 +328,24 @@ function void mightyBounce()
 //# address-hook(0x00ffd4) end(0x010214)
 function void Character.OnCollisionWithDynamicObject()
 {
-    s16 velocity_temp = char.velocity.y
+    s16 velocity_temp.x = char.velocity.x
+    s16 velocity_temp.y = char.velocity.y
     base.Character.OnCollisionWithDynamicObject()
     if (isMighty() && hammer_drop_state && char.base_state != base_state.HURT)
     {
         // Prevent the character's fall from being interrupted during hammer drop.
-        char.velocity.y = velocity_temp
+        char.velocity.x = velocity_temp.x
+        char.velocity.y = velocity_temp.y
     }
 }
 
 //# address-hook(0x00ff06) end(0x00ff5e)
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
-    if (isMighty() && hammer_drop_state)
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6)))
     {
-        u8 bonus_effect_temp = char.bonus_effect
+        // Grant invincibility during hammer drop and briefly after it lands.
+        u8 bonus_effect_temp = char.bonus_effect & char.bonus.INVINCIBLE
         char.bonus_effect |= char.bonus.INVINCIBLE
         base.Character.CheckCollisionsWithDynamicObjects_partial()
         char.bonus_effect = bonus_effect_temp
@@ -375,12 +372,10 @@ function void Character.CheckCollision()
 
     if (cling_timer && char.base_state == base_state.NORMAL)
     {
-        debugLog("collision check")
         D5.u8 = char.layer_flags2
         if (char.velocity.x > 0)
         {
             Character.CheckRightWallCollision()
-            debugLog(D3.u8)
             if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
             {
                 wall_cling = 1
@@ -391,7 +386,6 @@ function void Character.CheckCollision()
         else if (char.velocity.x < 0)
         {
             Character.CheckLeftWallCollision()
-            debugLog(D3.u8)
                 if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
                 {
                     wall_cling = 2
@@ -420,7 +414,20 @@ function void Character.UpdateSonicRollingInAir()
             char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
             wall_cling = 0
             char.double_jump_state = 0
+            wall_spin = 0
         }
+        /*
+        else if (control.player1.state & CONTROL_UP)
+        {
+            wall_spin = 1
+        }
+        if (wall_spin)
+        {
+            climbWall()
+            wall_spin++
+        }
+        */
+
         return
     }
     base.Character.UpdateSonicRollingInAir()
@@ -500,4 +507,66 @@ function void Character.HurtCheckForStateChange()
         char.invuln.countdown = 30
         block_spikes = 0
     }
+}
+
+//////////////////////////
+///      WIN POSE      ///
+//////////////////////////
+
+//# address-hook(0x083912) end(0x083936)
+function void fn083912()
+{
+    waiting_for_win_pose = 1
+    base.fn083912()
+}
+
+//# address-hook(0x0868f8) end(0x086930)
+function void fn0868f8()
+{
+    // Capsule
+    if (objA0.countdown_value <= 1)
+    {
+        waiting_for_win_pose = 1
+    }
+    base.fn0868f8()
+}
+
+//# address-hook(0x072b46) end(0x072b94)
+function void fn072b46()
+{
+    // LBZ2 post-boss cutscene
+    if (objA0.countdown_value <= 1)
+    {
+        waiting_for_win_pose = 1
+    }
+    base.fn072b46()
+}
+
+//# address-hook(0x0869c6) end(0x0869f4)
+function void StartCharacterWinPose()
+{
+    waiting_for_win_pose = 0
+    base.StartCharacterWinPose()
+}
+
+// Helper function
+function void updateWinPose()
+{
+    if (char.state == char.state.WIN_POSE)
+    {
+        // Advance the custom win pose animation.
+        ++mighty_wp_timer
+        // Advance to a new animation frame when the timer reaches the values in the list.
+        if (mighty_wp_timer >= WP_TIMES[mighty_wp_frame])
+            mighty_wp_frame = min(mighty_wp_frame + 1, 9)
+        // Loop timer within animation length (?)
+        if (mighty_wp_timer >= WP_TIMES[9] + WP_TIMES[0])
+            mighty_wp_timer = WP_TIMES[8]
+    }
+	else
+	{
+        // Reset when not in win-pose
+        mighty_wp_timer = 0
+        mighty_wp_frame = 0
+	}
 }

@@ -46,7 +46,7 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		else if (hammer_drop_state)
 		{
             string str = "mighty_hammer_drop_"
-            if (hammer_drop_diagonal)
+            if (hammer_drop_direction)
                 str += "45_"
 			if (hammer_drop_state <= 2)
 				str += "0x00"
