@@ -54,6 +54,24 @@ function void Character.Initialization.shared(u8 character)
     base.Character.Initialization.shared(character)
 }
 
+//# address-hook(0x016444) end(0x016498)
+function void Character.BaseUpdate.Knuckles()
+{
+    if (!isMighty())
+    {
+        base.Character.BaseUpdate.Knuckles()
+    }
+    else
+    {
+        char.character = CHARACTER_SONIC
+        global.characters = CHARS_SONIC_ALONE
+        Character.BaseUpdate.Sonic()
+        char.character = CHARACTER_KNUCKLES
+        global.characters = CHARS_KNUCKLES_ALONE
+    }
+    return
+}
+
 //# address-hook(0x010a94) end(0x010ae8)
 function void Character.BaseUpdate.Sonic()
 {
@@ -75,6 +93,25 @@ function void Character.BaseUpdate.Sonic()
     }
     base.Character.BaseUpdate.Sonic()
     updateWinPose()
+}
+
+//# translated(0x0117da) end(0x0118ba)
+//# translated(0x015002) end(0x0150d8)
+//# translated(0x017710) end(0x0177e8)
+function bool Character.CheckStartJump()
+{
+    bool result = false
+    if (!isMighty())
+    {
+        result = base.Character.CheckStartJump()
+    }
+    else
+    {
+        char.character = CHARACTER_KNUCKLES
+        result = base.Character.CheckStartJump()
+        char.character = CHARACTER_SONIC
+    }
+    return result
 }
 
 function void Character.updateJumpMoves()
@@ -102,7 +139,7 @@ function void Character.updateJumpMoves()
         cling_timer &= 0x1f
     }
     
-    if (!hammer_drop_state)
+    if (!hammer_drop_state && !char.spindash)
     {
         if (control.pad1.state & CONTROL_ABC)
         {
@@ -199,7 +236,11 @@ function void Character.UpdateControlInAir()
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
-        char.velocity.y = clamp(char.velocity.y + (hammer_drop_direction ? 0x78 : 0xc0), 0, 0x1000)
+        s16 dy = (hammer_drop_direction ? 0x78 : 0xc0)
+        if (char.flags & char.flag.UNDERWATER)
+            dy >>= 1
+        
+        char.velocity.y = clamp(char.velocity.y + dy, 0, 0x1000)
         char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
@@ -257,18 +298,23 @@ function void mightyBounce()
     
     if (bouncy_ball_state)
     {
-        bouncy_ball_state++
+        bouncy_ball_state = min(bouncy_ball_state + 1, 10)
     }
 
     s16 force = 0
     if (hammer_drop_state)
     {
         force = min(0xb00, 0x600 + hammer_drop_state * 0x30)
+        if (char.flags & char.flag.UNDERWATER)
+        {
+            force >>= 3
+            force *= 5
+        }
     }
     else if (bouncy_ball_state)
     {
         force = sqrt(square(s32(abs(char.velocity.x))) + square(s32(abs(char.velocity.y))))
-        force += 0x80 * (bouncy_ball_state - 1)
+        force += 0x80 * (bouncy_ball_state)
         force = clamp(force, 0x600, 0xc00)
     }
 

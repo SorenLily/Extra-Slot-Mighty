@@ -55,9 +55,9 @@ function void fn00d1fa()
 		{
 			// Loop through all save slots and reset their character value if it's higher than normal.
 			// This is needed in case the player turns off the mod while in the main menu.
-			if ((u8[address + 0x02] >> 4) >= (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 5 : 4))
+			if ((u8[address + 0x02] >> 4) > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
 			{
-				// Upper 4 bits store the character value; set it to 1 (SONIC_ALONE).
+				// Upper 4 bits store the character value; set it to 3 (KNUCKLES_ALONE).
 				u8[address + 0x02] = u8[address + 0x02] & 0xf + 0x10
 			}
 			address += 0xa
@@ -79,7 +79,8 @@ function void fn00d39e()
 	if (u8[buffer_address + objA0.flags2e] >= 1)
 	{
 		debugLog("Adjust save slot char on init")
-		u8[A0 + 0x35] = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
+		//debugLog()
+		u8[A0 + 0x35] = u8[A0 + 0x35] + 2
 	}
 	u64[buffer_address] = 0
 }
@@ -94,8 +95,8 @@ function void fn00d42c()
 	if (filler_byte_temp != u8[A1 + 0x01] && u8[A0 + 0x35] > max_characters)
 	{
 		debugLog("New game started as Mighty")
-		levelselect.characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 6 : 5) - u8[A0 + 0x35]
-		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | 0x10
+		levelselect.characters = u8[A0 + 0x35] - 2
+		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
 		SaveGameSlot()
 	}
 }
@@ -130,7 +131,7 @@ function bool fn00d458()
 		// Check extra save slot data to see if this is a Mighty save.
 		if (u8[buffer_address] & (1 << slot_index))
 		{
-			levelselect.characters = (max_characters + 2) - u8[A0 + 0x35]
+			levelselect.characters = u8[A0 + 0x35] - 2
 			is_mighty = 1
 		}
 		u8[buffer_address] = 0

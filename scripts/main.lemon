@@ -4,3 +4,8 @@ include rendercharacter
 include mightyabilities
 
 constant string CHAR_KEY = "Mighty"
+
+function void UpdateGameObjects()
+{
+	base.UpdateGameObjects()
+}
