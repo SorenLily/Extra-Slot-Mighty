@@ -5,7 +5,7 @@ global s8 hammer_drop_direction
 global u8 hammer_drop_rebound
 global u8 bouncy_ball_state
 global u8 wall_cling
-global u8 wall_spin
+//global u8 wall_spin
 // Timer that allows clinging to walls.
 global u8 cling_timer
 // State for blocking spike collisions.
@@ -454,7 +454,7 @@ function void Character.CheckCollision()
         return
     }
 
-    if (cling_timer && char.base_state == base_state.NORMAL)
+    if (cling_timer && char.base_state == base_state.NORMAL && !knuckles.preventclimbing)
     {
         D5.u8 = char.layer_flags2
         if (char.velocity.x > 0)
@@ -502,20 +502,24 @@ function void Character.UpdateSonicRollingInAir()
             }
             wall_cling = 0
             char.double_jump_state = 0
-            wall_spin = 0
         }
-        /*
-        else if (control.player1.state & CONTROL_UP)
+        else
         {
-            wall_spin = 1
+            D5.u8 = char.layer_flags2
+            if (wall_cling == 1)
+            {
+                Character.CheckRightWallCollision()
+            }
+            else if (wall_cling == 2)
+            {
+                Character.CheckLeftWallCollision()
+            }
+            if (D1.s16 != 0)
+            {
+                wall_cling = 0
+                char.state = char.state.ROLLING
+            }
         }
-        if (wall_spin)
-        {
-            climbWall()
-            wall_spin++
-        }
-        */
-
         return
     }
     base.Character.UpdateSonicRollingInAir()
