@@ -529,63 +529,85 @@ function void Character.UpdateSonicRollingInAir()
 //# address-hook(0x024090) end(0x0240dc)
 function void Spikes.Update()
 {
-    if (!block_spikes)
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
-        if (hammer_drop_state || (bouncy_ball_state >= 2))
-        {
-            block_spikes = 1
-        }
-        base.Spikes.Update()
-        if (block_spikes == 1)
-        {
-            block_spikes = 0
-        }
+        block_spikes = 1
     }
-    else
+    base.Spikes.Update()
+    if (block_spikes == 1)
     {
-        base.Spikes.Update()
+        block_spikes = 0
     }
+
 }
 
 //# address-hook(0x0240e2) end(0x024138)
 function void fn0240e2()
 {
-    if (!block_spikes)
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
-        if (hammer_drop_state || (bouncy_ball_state >= 2))
-        {
-            block_spikes = 1
-        }
-        base.fn0240e2()
-        if (block_spikes == 1)
-        {
-            block_spikes = 0
-        }
+        block_spikes = 1
     }
-    else
+    base.fn0240e2()
+    if (block_spikes == 1)
     {
-        base.fn0240e2()
+        block_spikes = 0
     }
 }
 
 //# address-hook(0x02413e) end(0x024188)
 function void fn02413e()
 {
-    if (!block_spikes)
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
-        if (hammer_drop_state || (bouncy_ball_state >= 2))
-        {
-            block_spikes = 1
-        }
-        base.fn02413e()
-        if (block_spikes == 1)
-        {
-            block_spikes = 0
-        }
+        block_spikes = 1
     }
-    else
+    base.fn02413e()
+    if (block_spikes == 1)
     {
-        base.fn02413e()
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x01f45e) end(0x01f4c2)
+function void fn01f45e()
+{
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f45e()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x01f4c4) end(0x01f526)
+function void fn01f4c4()
+{
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f4c4()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x01f528) end(0x01f58a)
+function void fn01f528()
+{
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f528()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
     }
 }
 
@@ -600,6 +622,8 @@ function void Character.GettingHurt()
         base.Character.GettingHurt()
         char.protection_flag = protection_temp
         block_spikes = 3
+        hammer_drop_state = 0
+        bouncy_ball_state = 0
     }
     else
     {
