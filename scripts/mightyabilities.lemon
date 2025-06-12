@@ -300,7 +300,8 @@ function void Character.LandingOnGroundResetState()
         // Bounce off the ground.
         if (!waiting_for_win_pose)
         {
-            store_bounce = 1
+            if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
+                store_bounce = 1
             velocity.x.copy = mainchar.groundhit.velocity.x
             velocity.y.copy = mainchar.groundhit.velocity.y
             playSound(hammer_drop_state ? 0x5f : 0x49)
