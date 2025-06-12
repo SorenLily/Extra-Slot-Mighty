@@ -44,6 +44,14 @@ function void playSound(u8 soundId)
     base.playSound(soundId)
 }
 
+function bool isFloating()
+{
+    bool result = (char.state == char.state.RUNNING && char.rotation.x != 0)
+    if (result)
+        debugLog("floating")
+    return result
+}
+
 function void Character.Initialization.shared(u8 character)
 {
     // Reset global state on initialization.
@@ -60,6 +68,7 @@ function void Character.Initialization.shared(u8 character)
     velocity.y.copy = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
+    waiting_for_win_pose = 0
     base.Character.Initialization.shared(character)
 }
 
@@ -90,7 +99,7 @@ function void Character.BaseUpdate.Sonic()
         return
     }
 
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR))
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating())
     {
         // Reset all ability states.
         hammer_drop_state = 0
@@ -172,7 +181,7 @@ function void Character.updateJumpMoves()
     
     if (!hammer_drop_state && !char.spindash)
     {
-        if (control.pad1.state & CONTROL_ABC)
+        if ((control.pad1.state & CONTROL_ABC) && (char.state != char.state.LIFTED) && !isFloating())
         {
             // Enter bouncy ball state.
             bouncy_ball_state = max(bouncy_ball_state, 1)
@@ -271,7 +280,7 @@ function void Character.UpdateControlInAir()
         s16 dy = (hammer_drop_direction ? 0x78 : 0xc0)
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
-        
+
         char.velocity.y = clamp(char.velocity.y + dy, 0, 0x1000)
         char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
@@ -485,7 +494,11 @@ function void Character.UpdateSonicRollingInAir()
         {
             debugLog("wall jump")
             char.velocity.y = -0x680
-            char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
+            char.velocity.x = (wall_cling == 1) ? -0x240 : 0x240
+            if (char.flags & char.flag.UNDERWATER)
+            {
+                char.velocity.y >>= 1
+            }
             wall_cling = 0
             char.double_jump_state = 0
             wall_spin = 0
@@ -516,42 +529,63 @@ function void Character.UpdateSonicRollingInAir()
 //# address-hook(0x024090) end(0x0240dc)
 function void Spikes.Update()
 {
-    if (hammer_drop_state || bouncy_ball_state)
+    if (!block_spikes)
     {
-        block_spikes = 1
+        if (hammer_drop_state || (bouncy_ball_state >= 2))
+        {
+            block_spikes = 1
+        }
+        base.Spikes.Update()
+        if (block_spikes == 1)
+        {
+            block_spikes = 0
+        }
     }
-    base.Spikes.Update()
-    if (block_spikes == 1)
+    else
     {
-        block_spikes = 0
+        base.Spikes.Update()
     }
 }
 
 //# address-hook(0x0240e2) end(0x024138)
 function void fn0240e2()
 {
-    if (hammer_drop_state || bouncy_ball_state)
+    if (!block_spikes)
     {
-        block_spikes = 1
+        if (hammer_drop_state || (bouncy_ball_state >= 2))
+        {
+            block_spikes = 1
+        }
+        base.fn0240e2()
+        if (block_spikes == 1)
+        {
+            block_spikes = 0
+        }
     }
-    base.fn0240e2()
-    if (block_spikes == 1)
+    else
     {
-        block_spikes = 0
+        base.fn0240e2()
     }
 }
 
 //# address-hook(0x02413e) end(0x024188)
 function void fn02413e()
 {
-    if (hammer_drop_state || bouncy_ball_state)
+    if (!block_spikes)
     {
-        block_spikes = 1
+        if (hammer_drop_state || (bouncy_ball_state >= 2))
+        {
+            block_spikes = 1
+        }
+        base.fn02413e()
+        if (block_spikes == 1)
+        {
+            block_spikes = 0
+        }
     }
-    base.fn02413e()
-    if (block_spikes == 1)
+    else
     {
-        block_spikes = 0
+        base.fn02413e()
     }
 }
 
