@@ -10,7 +10,12 @@ global u8 wall_spin
 global u8 cling_timer
 // State for blocking spike collisions.
 global u8 block_spikes
+// Animation variable for bouncy ball state
+global u8 bouncy_ball_frame
 
+global s8 store_bounce
+global s16 velocity.x.copy
+global s16 velocity.y.copy
 // Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
@@ -46,9 +51,13 @@ function void Character.Initialization.shared(u8 character)
     hammer_drop_direction = 0
     hammer_drop_rebound = 0
     bouncy_ball_state = 0
+    bouncy_ball_frame = 0
     wall_cling = 0
     cling_timer = 0
     block_spikes = 0
+    store_bounce = 0
+    velocity.x.copy = 0
+    velocity.y.copy = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
     base.Character.Initialization.shared(character)
@@ -91,8 +100,30 @@ function void Character.BaseUpdate.Sonic()
         wall_cling = 0
         cling_timer = 0
     }
+
     base.Character.BaseUpdate.Sonic()
     updateWinPose()
+    updateBouncyBallAnim()
+}
+
+function void updateGameObjectLoop()
+{   
+    base.updateGameObjectLoop()
+    if (is_mighty && (u32[0xffffb000] == 0x016444) && store_bounce)
+    {
+        u32 a0_temp = A0
+        A0 = 0xffffb000
+        if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE))
+        {
+            mightyBounce()
+        }
+        A0 = a0_temp
+        store_bounce = 0
+        // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
+        hammer_drop_rebound = hammer_drop_state ? 12 : 0
+        hammer_drop_state = 0
+        hammer_drop_direction = 0
+    }
 }
 
 //# translated(0x0117da) end(0x0118ba)
@@ -164,7 +195,7 @@ function void SonicPressedJumpInMidAir()
 {
     if (!isMighty())
     {
-        base.SonicPressedJumpInMidAir()
+        base.SonicPressedJumpInMidAir() 
         return
     }
 
@@ -202,10 +233,11 @@ function void Character.UpdateControlInAir()
         return
     }
 
-    if (bouncy_ball_state >= 2)
+    if (bouncy_ball_state >= 3)
     {
         s16 maxSpeed = s16[A4]
 		s16 acceleration = s16[A4 + 2]
+        s16 dv = (acceleration >> 2) * 3
         // If this is true, then air drag was applied to the character.
         if (char.velocity.y < 0 && char.velocity.y >= -0x400)
         {
@@ -215,20 +247,20 @@ function void Character.UpdateControlInAir()
         // Allow extra acceleration during bouncy ball while pressing directions.
         if (control.player1.state & CONTROL_LEFT)
         {
-            char.velocity.x -= acceleration >> 1
+            char.velocity.x -= dv
         }
         else if (control.player1.state & CONTROL_RIGHT)
         {
-            char.velocity.x += acceleration >> 1
+            char.velocity.x += dv
         }
 
         if (control.player1.state & CONTROL_UP)
         {
-            char.velocity.y -= acceleration >> 1
+            char.velocity.y -= dv
         }
         else if (control.player1.state & CONTROL_DOWN)
         {
-            char.velocity.y += acceleration >> 1
+            char.velocity.y += dv
         }
         centerCameraYOffset()
     }
@@ -254,18 +286,16 @@ function void Character.LandingOnGroundResetState()
     if (!isMighty())
         return
     
-    if (hammer_drop_state || bouncy_ball_state)
+    if (hammer_drop_state || bouncy_ball_state >= 2)
     {
         // Bounce off the ground.
         if (!waiting_for_win_pose)
         {
-            mightyBounce()
+            store_bounce = 1
+            velocity.x.copy = mainchar.groundhit.velocity.x
+            velocity.y.copy = mainchar.groundhit.velocity.y
+            playSound(hammer_drop_state ? 0x5f : 0x49)
         }
-        // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
-        hammer_drop_rebound = hammer_drop_state ? 12 : 0
-        // Reset states.
-        hammer_drop_state = 0
-        hammer_drop_direction = 0
         wall_cling = 0
         cling_timer = 0
     }
@@ -276,8 +306,11 @@ function void mightyBounce()
 {
     // A lot of this is copied from SonicLandingBubbleBounce().
 
-    s16 vx = mainchar.groundhit.velocity.x
-    s16 vy = mainchar.groundhit.velocity.y
+    s16 vx = velocity.x.copy
+    s16 vy = velocity.y.copy
+    velocity.x.copy = 0
+    velocity.y.copy = 0
+
     u8 moveAngle = lookupAngleByVector(vx, vy)
     u8 groundAngle = char.rotation
     u8 reflected_angle = 0
@@ -296,22 +329,17 @@ function void mightyBounce()
     }
     //debugLog(reflected_angle)
     
-    if (bouncy_ball_state)
+    if (bouncy_ball_state >= 2)
     {
-        bouncy_ball_state = min(bouncy_ball_state + 1, 10)
+        bouncy_ball_state = min(bouncy_ball_state + 1, 12)
     }
 
     s16 force = 0
     if (hammer_drop_state)
     {
         force = min(0xb00, 0x600 + hammer_drop_state * 0x30)
-        if (char.flags & char.flag.UNDERWATER)
-        {
-            force >>= 3
-            force *= 5
-        }
     }
-    else if (bouncy_ball_state)
+    else if (bouncy_ball_state >= 2)
     {
         force = sqrt(square(s32(abs(char.velocity.x))) + square(s32(abs(char.velocity.y))))
         force += 0x80 * (bouncy_ball_state)
@@ -330,10 +358,10 @@ function void mightyBounce()
         char.velocity.x = (s32(lookupCos(reflected_angle)) * force) >> 8
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
     }
-    else if (bouncy_ball_state)
+    else if (bouncy_ball_state >= 2)
     {
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
-        char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 1)
+        char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 2)
         char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
         // If pressing left/right in the opposite direction of the bounce...
         if ((char.velocity.x > 0 && (control.player1.state & CONTROL_LEFT)) || (char.velocity.x < 0 && (control.player1.state & CONTROL_RIGHT)))
@@ -343,19 +371,19 @@ function void mightyBounce()
         char.velocity.x = clamp(char.velocity.x, -0x800, 0x800)
     }
 
+    if (char.flags & char.flag.UNDERWATER)
+    {
+        char.velocity.x >>= 3
+        char.velocity.x *= 5
+        char.velocity.y >>= 3
+        char.velocity.y *= 5
+    }
+
     //debugLog(char.velocity.x)
     //debugLog(char.velocity.y)
 
     char.state = char.state.ROLLING
     char.flags |= char.flag.ROLLING
-    if (hammer_drop_state)
-    {
-        playSound(0x5f)
-    }
-    else
-    {
-        playSound(0x49)
-    }
     //debugLog(stringformat("char.rotation = 0x%x", char.rotation))
     if (!slide)
     {
@@ -615,4 +643,18 @@ function void updateWinPose()
         mighty_wp_timer = 0
         mighty_wp_frame = 0
 	}
+}
+
+function void updateBouncyBallAnim()
+{
+    if (bouncy_ball_state)
+        bouncy_ball_frame++
+    else
+        bouncy_ball_frame = 0
+    
+    if (bouncy_ball_state == 1 && bouncy_ball_frame > 6)
+        bouncy_ball_state = 2
+        
+    if (bouncy_ball_frame > 18)
+        bouncy_ball_frame = 7
 }
