@@ -1,28 +1,32 @@
+// 0 -> off, >= 1 -> dropping the hammer.
 global u16 hammer_drop_state
-// Left = -1, Down = 0, Right = 1
+// -1 -> Left, 0 -> Down, 1 -> Right
 global s8 hammer_drop_direction
-// Used for animation after bouncing from hammer_drop, and as the cooldown of hammer_drop.
+// Used for animation after bouncing from hammer drop, and as the cooldown of hammer drop.
 global u8 hammer_drop_rebound
+// 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
 global u8 bouncy_ball_state
+// 0 -> off, 1 -> clinging to left wall, 2 -> clinging to right wall.
 global u8 wall_cling
-//global u8 wall_spin
 // Timer that allows clinging to walls.
 global u8 cling_timer
-// State for blocking spike collisions.
+// State for blocking damage from spike collisions.
 global u8 block_spikes
-// Animation variable for bouncy ball state
+// Animation value for bouncy ball state.
 global u8 bouncy_ball_frame
-
+// Flag used to denote that we will bounce later this frame.
 global s8 store_bounce
+// Copies of velocity used for bouncing.
 global s16 velocity.x.copy
 global s16 velocity.y.copy
+// Flag that prevents bouncing when the game is waiting to start the character's win pose.
+global u8 waiting_for_win_pose
 // Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
-global u8 waiting_for_win_pose
-
+// Flag to supress sounds. Only set in one place.
 global bool supress_sfx
-
+// Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
 
 // Helper function
@@ -37,6 +41,17 @@ function u32 square(u32 x)
     return (x * x)
 }
 
+// Helper function
+function void setRollingState()
+{
+    char.state = char.state.ROLLING
+    char.flags |= char.flag.ROLLING
+    char.hitbox_extends.x = char.hitbox.x.ROLLING
+    char.hitbox_extends.y = char.hitbox.y.ROLLING
+    s8 dy = char.hitbox_extends.y - char.hitbox.default.y
+    char.position.y.u16 += (global.inv_gravity) ? dy : -dy
+}
+
 function void playSound(u8 soundId)
 {
     if (supress_sfx)
@@ -44,8 +59,13 @@ function void playSound(u8 soundId)
     base.playSound(soundId)
 }
 
+// Helper function
 function bool isFloating()
 {
+    // This returns true while being lifted by "fans":
+    // - The propellers in HCZ,
+    // - The weird orange propellers(?) in CNZ,
+    // - The bottom of the stage in SSZ.
     bool result = (char.state == char.state.RUNNING && char.rotation.x != 0)
     if (result)
         debugLog("floating")
@@ -54,7 +74,7 @@ function bool isFloating()
 
 function void Character.Initialization.shared(u8 character)
 {
-    // Reset global state on initialization.
+    // Reset all global state on initialization.
     hammer_drop_state = 0
     hammer_drop_direction = 0
     hammer_drop_rebound = 0
@@ -81,6 +101,12 @@ function void Character.BaseUpdate.Knuckles()
     }
     else
     {
+        // Mighty is treated as Knuckles for most purposes in the game, but I prefer that Sonic
+        // be the base when working with the character's code. To achieve this, we'll just switch
+        // to being Sonic and then run Sonic's update function instead of Knuckles'.
+
+        // TODO: This setup is not great for compatibility since some mods might hook the update functions
+        // of both Knuckles and Sonic, and thus get confused by this mod. See if there's a better way to do this.
         char.character = CHARACTER_SONIC
         global.characters = CHARS_SONIC_ALONE
         Character.BaseUpdate.Sonic()
@@ -98,19 +124,25 @@ function void Character.BaseUpdate.Sonic()
         base.Character.BaseUpdate.Sonic()
         return
     }
-
+    // These are all cases where we do not want Mighty's abilities to work or progress:
+    // 1) If Mighty is HURT or DIED,
+    // 2) Or if Mighty is being controlled by an object instead of controlled normally,
+    // 3) Or if Mighty is not in the air (all his abilities are aerial),
+    // 4) Or if Mighty is being lifted by "fans" (see isFloating() for more details),
+    // Then...
     if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating())
     {
-        // Reset all ability states.
+        // Reset ability states.
         hammer_drop_state = 0
         hammer_drop_direction = 0
         hammer_drop_rebound = 0
         bouncy_ball_state = 0
+        bouncy_ball_frame = 0
         wall_cling = 0
         cling_timer = 0
     }
-
     base.Character.BaseUpdate.Sonic()
+    // Update custom animations.
     updateWinPose()
     updateBouncyBallAnim()
 }
@@ -118,11 +150,27 @@ function void Character.BaseUpdate.Sonic()
 function void updateGameObjectLoop()
 {   
     base.updateGameObjectLoop()
+    // I hate that I need to put the bounce code here, but there's just no other practical way.
+    // The problem is that landing on the ground can happen either during the character's update function,
+    // or during the update function of other objects that allow the player to land on them, or both! This
+    // causes multiple issues when trying to bounce on the ground. Sometimes the character will bounce during
+    // their update function and accelerate up, causing them to not land on (and interact with) an object that
+    // they should. Other times the player can land on an object during that object's update function, and
+    // end up in an unexpected state since it can bypass any checks in the character's code.
+
+    // The only (good) way to deal with this whole situation is to handle the bounce code after all other
+    // updates have run. This means it definitely only runs once, does not interfere with object interactions,
+    // and our checks and state will not be violated later in the frame.
+
+    // If player 1 is mighty and we have triggered a bounce...
     if (is_mighty && (u32[0xffffb000] == 0x016444) && store_bounce)
     {
+        // Set A0 to the player to make things simpler.
         u32 a0_temp = A0
         A0 = 0xffffb000
-        if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE))
+        // If we are still in control of the player and on the ground...
+        // (The IN_AIR check is needed because some objects, like springs, cause you to land but then immediately go back in the air.)
+        if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE) && !(char.flags & char.flag.IN_AIR))
         {
             mightyBounce()
         }
@@ -130,8 +178,10 @@ function void updateGameObjectLoop()
         store_bounce = 0
         // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
         hammer_drop_rebound = hammer_drop_state ? 12 : 0
+        // Reset hammer drop state.
         hammer_drop_state = 0
         hammer_drop_direction = 0
+        // Don't reset bouncy ball state, it's allowed to carry over between bounces.
     }
 }
 
@@ -147,12 +197,15 @@ function bool Character.CheckStartJump()
     }
     else
     {
+        // Pretend to be Knuckles to get the lower jump height.
         char.character = CHARACTER_KNUCKLES
         result = base.Character.CheckStartJump()
         char.character = CHARACTER_SONIC
     }
     return result
 }
+
+// NOTE: we need to disable all of Sonic's jump abilities, which is handled in the next 2 hooks.
 
 function void Character.updateJumpMoves()
 {
@@ -162,11 +215,14 @@ function void Character.updateJumpMoves()
         return
     }
 
-    // Modify char.bonus_effect to disable elemental shields.
+    // Modify char.bonus_effect to disable all elemental shield abilities.
+    // TODO: This is done here because they get checked in both SonicPressedJumpInMidAir() and onCharacterPressedJumpInMidair(),
+    // but maybe it would be better to just handle this in both functions individually.
     u8 bonus_effect_temp = char.bonus_effect
     char.bonus_effect = 0
     base.Character.updateJumpMoves()
     char.bonus_effect = bonus_effect_temp
+    // Disable dropdash by keeping it's counter at 0.
     sonic.dropdash_counter = 0
     // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
     char.double_jump_state = 0
@@ -179,20 +235,24 @@ function void Character.updateJumpMoves()
         cling_timer &= 0x1f
     }
     
+    // If we're not hammer dropping and not spindashing...
+    // (The second check is needed; it is possible to be spindashing in the air in specific circumstances.)
     if (!hammer_drop_state && !char.spindash)
     {
+        // If holding jump and not in LIFTED state and not being pushed by "fans"...
         if ((control.pad1.state & CONTROL_ABC) && (char.state != char.state.LIFTED) && !isFloating())
         {
-            // Enter bouncy ball state.
+            // Enter bouncy ball state. Note that bouncy ball state must be >= 2 to have an effect.
             bouncy_ball_state = max(bouncy_ball_state, 1)
         }
+        // If jump was pressed and we're not clinging to a wall...
         if ((control.pad1.pressed & CONTROL_ABC) && !wall_cling)
         {
             // Start the timer to allow clinging to walls.
             cling_timer = 1
         }
     }
-    
+    // If in bouncy ball state and no longer holding jump...
     if (bouncy_ball_state && !(control.pad1.state & CONTROL_ABC))
     {
         // End bouncy ball state.
@@ -208,22 +268,28 @@ function void SonicPressedJumpInMidAir()
         return
     }
 
-    // Disable Super Sonic's air-dash and the Insta-shield's graphic.
+    // Disable Super Sonic's air-dash.
     u8 super_temp = super.active
-    u8 shield_state_temp = u8[0xffffcce8 + 0x20]
     super.active = 0
+    // Need to store and reset this value to prevent the shield object from animating.
+    // TODO: if Mighty is treated as knuckles, this object may not even exist. Should we still do this?
+    u8 shield_state_temp = u8[0xffffcce8 + 0x20]
+    // Supress any sfx during this function, i.e the instashield sound.
     supress_sfx = true
     base.SonicPressedJumpInMidAir()
     supress_sfx = false
     super.active = super_temp
     u8[0xffffcce8 + 0x20] = shield_state_temp
 
+    // If holding down...
     if (control.pad1.state & CONTROL_DOWN)
     {
-        // Start hammer drop.
+        // End the bouncy ball state.
+        bouncy_ball_state = 0
+        // Start the hammer drop.
         if (!hammer_drop_rebound)
             hammer_drop_state = 1
-        bouncy_ball_state = 0
+        // Set the appropriate direction (it stays at 0 if we're going straight down).
         if (control.pad1.state & CONTROL_LEFT)
             hammer_drop_direction = -1
         else if (control.pad1.state & CONTROL_RIGHT)
@@ -241,7 +307,7 @@ function void Character.UpdateControlInAir()
     {
         return
     }
-
+    // If we have bounced at least once during bouncy ball state...
     if (bouncy_ball_state >= 3)
     {
         s16 maxSpeed = s16[A4]
@@ -277,13 +343,15 @@ function void Character.UpdateControlInAir()
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
+        hammer_drop_state = min(0x80, hammer_drop_state + 1)
         s16 dy = (hammer_drop_direction ? 0x78 : 0xc0)
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
 
+        // Cancel any upward y-velocity the player has, and accelerate.
         char.velocity.y = clamp(char.velocity.y + dy, 0, 0x1000)
+        // Add x-velocity in the appropriate direction (none if going down).
         char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
-        hammer_drop_state = min(0x80, hammer_drop_state + 1)
     }
     if (hammer_drop_rebound)
         hammer_drop_rebound--
@@ -292,20 +360,27 @@ function void Character.UpdateControlInAir()
 function void Character.LandingOnGroundResetState()
 {
     base.Character.LandingOnGroundResetState()
+    // NOTE: Even though A0 is always the character here, this function can be called by many objects, not just the character.
     if (!isMighty())
         return
+
+    // NOTE: Here we do not actually run any bounce logic, we just set a flag that we will bounce later in the frame.
+    // See the hook to updateGameObjectLoop() for more information.
     
+    // If we are in a bouncing state...
     if (hammer_drop_state || bouncy_ball_state >= 2)
     {
-        // Bounce off the ground.
         if (!waiting_for_win_pose)
         {
+            // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
             if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
                 store_bounce = 1
+            // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
             velocity.x.copy = mainchar.groundhit.velocity.x
             velocity.y.copy = mainchar.groundhit.velocity.y
             playSound(hammer_drop_state ? 0x5f : 0x49)
         }
+        // Reset wall cling values.
         wall_cling = 0
         cling_timer = 0
     }
@@ -314,43 +389,52 @@ function void Character.LandingOnGroundResetState()
 // Helper function
 function void mightyBounce()
 {
-    // A lot of this is copied from SonicLandingBubbleBounce().
+    // NOTE: This is a heavily modified version of SonicLandingBubbleBounce().
+    // TODO: This whole function is messy and needs more work. See if it can be improved.
 
     s16 vx = velocity.x.copy
     s16 vy = velocity.y.copy
     velocity.x.copy = 0
     velocity.y.copy = 0
 
-    u8 moveAngle = lookupAngleByVector(vx, vy)
-    u8 groundAngle = char.rotation
+    // The angle of our movement.
+    u8 move_angle = lookupAngleByVector(vx, vy)
+    // The angle of the tile we're standing on.
+    u8 ground_angle = char.rotation
     u8 reflected_angle = 0
     u8 slide = 0
+    // For shallow enough angles...
     if (char.rotation <= 0x28 || char.rotation >= 0xd0)
     {
-        reflected_angle = groundAngle * 2 - moveAngle
+        // Reflect off of them
+        reflected_angle = ground_angle * 2 - move_angle
     }
-    else
+    else // For steep angles...
     {
+        // Instead of bouncing off, we'll stick to the slope and try to slide along it.
         debugLog("slide")
         slide = 1
-        reflected_angle = groundAngle
+        reflected_angle = ground_angle
         if (hammer_drop_state)
             reflected_angle += 0x80
     }
-    //debugLog(reflected_angle)
     
     if (bouncy_ball_state >= 2)
     {
+        // Increment bouncy_ball_state every time it bounces.
         bouncy_ball_state = min(bouncy_ball_state + 1, 12)
     }
-
+    // Now we'll actually calculate the velocity.
     s16 force = 0
     if (hammer_drop_state)
     {
+        // The formula is simple for the hammer drop state.
         force = min(0xb00, 0x600 + hammer_drop_state * 0x30)
     }
     else if (bouncy_ball_state >= 2)
     {
+        // Get the magnitude of our current velocity, then increment it based on bouncy_ball_state, and clamp.
+        // TODO: This probably needs to be modified, especially to deal with slopes.
         force = sqrt(square(s32(abs(char.velocity.x))) + square(s32(abs(char.velocity.y))))
         force += 0x80 * (bouncy_ball_state)
         force = clamp(force, 0x600, 0xc00)
@@ -360,27 +444,33 @@ function void mightyBounce()
     {
         if (slide)
         {
+            // Add extra force.
             force += force >> 2
             if (hammer_drop_state)
-                reflected_angle += 0x80
+                reflected_angle += 0x80 // ???
         }
-            
+        // Standard velocity calculation for this game.
         char.velocity.x = (s32(lookupCos(reflected_angle)) * force) >> 8
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
     }
     else if (bouncy_ball_state >= 2)
     {
+        // Set the y-velocity the standard way.
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
+        // Set the x-velocity more directly so that it can go faster without affecting y-velocity.
+        // TODO: this probably needs to be modified and take the force value into account.
         char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 2)
         char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
         // If pressing left/right in the opposite direction of the bounce...
         if ((char.velocity.x > 0 && (control.player1.state & CONTROL_LEFT)) || (char.velocity.x < 0 && (control.player1.state & CONTROL_RIGHT)))
         {
+            // Flip the x-velocity and decrease it somewhat.
             char.velocity.x = -(char.velocity.x - (char.velocity.x >> 2))
         }
         char.velocity.x = clamp(char.velocity.x, -0x800, 0x800)
     }
 
+    // Underwater movement penalty.
     if (char.flags & char.flag.UNDERWATER)
     {
         char.velocity.x >>= 3
@@ -392,20 +482,14 @@ function void mightyBounce()
     //debugLog(char.velocity.x)
     //debugLog(char.velocity.y)
 
-    char.state = char.state.ROLLING
-    char.flags |= char.flag.ROLLING
-    //debugLog(stringformat("char.rotation = 0x%x", char.rotation))
+    setRollingState()
     if (!slide)
     {
+        // Set the necessary flags to represent being in the air.
         char.flags |= char.flag.IN_AIR
         char.flags &= ~char.flag.PUSHING
         char.jumping = 1
         char.on_convex_surface = 0
-        char.hitbox_extends.x = char.hitbox.x.ROLLING
-        char.hitbox_extends.y = char.hitbox.y.ROLLING
-
-        s8 dy = char.hitbox_extends.y - char.hitbox.default.y
-        char.position.y.u16 += (global.inv_gravity) ? dy : -dy
     }
 }
 
@@ -415,9 +499,10 @@ function void Character.OnCollisionWithDynamicObject()
     s16 velocity_temp.x = char.velocity.x
     s16 velocity_temp.y = char.velocity.y
     base.Character.OnCollisionWithDynamicObject()
+    // If we are in hammer drop state and we didn't get HURT...
     if (isMighty() && hammer_drop_state && char.base_state != base_state.HURT)
     {
-        // Prevent the character's fall from being interrupted during hammer drop.
+        // Prevent the character's descent from being displaced during hammer drop.
         char.velocity.x = velocity_temp.x
         char.velocity.y = velocity_temp.y
     }
@@ -426,9 +511,10 @@ function void Character.OnCollisionWithDynamicObject()
 //# address-hook(0x00ff06) end(0x00ff5e)
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
+    // If we're in the hammer drop state or a few frames after it has bounced...
     if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6)))
     {
-        // Grant invincibility during hammer drop and briefly after it lands.
+        // Grant invincibility for collisions.
         u8 bonus_effect_temp = char.bonus_effect & char.bonus.INVINCIBLE
         char.bonus_effect |= char.bonus.INVINCIBLE
         base.Character.CheckCollisionsWithDynamicObjects_partial()
@@ -453,33 +539,46 @@ function void Character.CheckCollision()
         base.Character.CheckCollision()
         return
     }
-
+    // If we are allowed to cling to walls and we are in the NORMAL state and knuckles would be allowed to cling to walls...
     if (cling_timer && char.base_state == base_state.NORMAL && !knuckles.preventclimbing)
     {
+        
+        // Check if we are colliding with a wall, and if so, cling to it.
+        // TODO: refactor wall_cling so that -1 represents the left wall and 1 represents the right wall.
+
+        // This needs to be set for the collision checking functions.
         D5.u8 = char.layer_flags2
+        // Moving to the right...
         if (char.velocity.x > 0)
         {
             Character.CheckRightWallCollision()
+            // If a collision was detected and the rotation of the tile is a 90° angle...
             if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
             {
                 wall_cling = 1
                 cling_timer = 0
             }     
         }
-            
+        // Moving to the left...
         else if (char.velocity.x < 0)
         {
             Character.CheckLeftWallCollision()
-                if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
-                {
-                    wall_cling = 2
-                    cling_timer = 0
-                }
+            // If a collision was detected and the rotation of the tile is a 90° angle..
+            if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
+            {
+                wall_cling = 2
+                cling_timer = 0
+            }
         }
+        // No need to do any kind of position management. The base function will handle that for us.
     }
     base.Character.CheckCollision()
+    // If we are clinging to a wall...
     if (wall_cling == 1 || wall_cling == 2)
     {
+        // Remove all velocity and play the sound.
+        // NOTE: Clinging to walls disables a lot of character code, including this function. (See the next hook
+        // for more details.) So this block will only run once when the wall first gets grabbed.
         char.velocity.x = 0
         char.velocity.y = 0
         playSound(SFX_GRAB)
@@ -489,10 +588,17 @@ function void Character.CheckCollision()
 //# address-hook(0x011036) end(0x01105e)
 function void Character.UpdateSonicRollingInAir()
 {
+    // If we're clinging to a wall...
     if (isMighty() && wall_cling)
     {
+        // This branch deliberately does not call the base function. This disables most of the update code
+        // that would be run for the character, which essentially freezes the character in place and prevents
+        // all normal controls. This works great for the wall cling, and the player can jump off to end it.
+
+        // If jump was pressed...
         if (control.player1.pressed & CONTROL_ABC)
         {
+            // Jump off the wall.
             debugLog("wall jump")
             char.velocity.y = -0x680
             char.velocity.x = (wall_cling == 1) ? -0x240 : 0x240
@@ -500,11 +606,14 @@ function void Character.UpdateSonicRollingInAir()
             {
                 char.velocity.y >>= 1
             }
+            // End the wall cling.
             wall_cling = 0
             char.double_jump_state = 0
         }
         else
         {
+            // The player cannot move in this state, but other objects might push the character. We need to check for this.
+            // This needs to be set for the collision checking functions.
             D5.u8 = char.layer_flags2
             if (wall_cling == 1)
             {
@@ -514,12 +623,15 @@ function void Character.UpdateSonicRollingInAir()
             {
                 Character.CheckLeftWallCollision()
             }
+            // This value should be exactly 0. If it is not, something pushed us left or right.
             if (D1.s16 != 0)
             {
+                // If so, end the wall cling.
                 wall_cling = 0
-                char.state = char.state.ROLLING
+                setRollingState()
             }
         }
+        // Return without calling the base.
         return
     }
     base.Character.UpdateSonicRollingInAir()
@@ -529,11 +641,12 @@ function void Character.UpdateSonicRollingInAir()
 ///       SPIKES       ///
 //////////////////////////
 
-// Floor, Ceiling, and Wall spikes all have different update functions.
+// Floor, Ceiling, and Wall spikes all have different update functions, so we need 3 hooks to account for them.
 
 //# address-hook(0x024090) end(0x0240dc)
 function void Spikes.Update()
 {
+    // Floor spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
         block_spikes = 1
@@ -543,12 +656,12 @@ function void Spikes.Update()
     {
         block_spikes = 0
     }
-
 }
 
 //# address-hook(0x0240e2) end(0x024138)
 function void fn0240e2()
 {
+    // Wall spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
         block_spikes = 1
@@ -563,6 +676,7 @@ function void fn0240e2()
 //# address-hook(0x02413e) end(0x024188)
 function void fn02413e()
 {
+    // Ceiling spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
     {
         block_spikes = 1
@@ -574,9 +688,15 @@ function void fn02413e()
     }
 }
 
+// Also, in some zones, damaging blocker elements look like spikes, even though they're not. In HCZ, there's a
+// strip of "spikes" that is actually just a damaging blocker element, and in ICZ the icicle-spikes are also
+// damaging blocker elements. And they also have 3 different update functions based on orientation, so we need
+// another 3 hooks.
+
 //# address-hook(0x01f45e) end(0x01f4c2)
 function void fn01f45e()
 {
+    // Floor hazard.
     if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
     {
         block_spikes = 1
@@ -591,6 +711,7 @@ function void fn01f45e()
 //# address-hook(0x01f4c4) end(0x01f526)
 function void fn01f4c4()
 {
+    // Wall hazard.
     if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
     {
         block_spikes = 1
@@ -605,6 +726,7 @@ function void fn01f4c4()
 //# address-hook(0x01f528) end(0x01f58a)
 function void fn01f528()
 {
+    // Ceiling hazard.
     if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
     {
         block_spikes = 1
@@ -619,19 +741,30 @@ function void fn01f528()
 //# address-hook(0x010294) end(0x010364)
 function void Character.GettingHurt()
 {
+    // Now to actually prevent spike damage.
+    
+    // The checks here:
+    // - We check for isMighty() here and not in the above hooks because in the above hooks we can't
+    //   distinguish between player 1 and player 2.
+    // - block_spikes will only be equal to 1 if we collided with a spike and are in a bouncing state.
+    // - If char.protection_flag is already set, there's no need to do anything.
     if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
     {
+        // The protection flag blocks damage exactly as we want for mighty, so just give him that.
         u8 protection_temp = char.protection_flag
         char.protection_flag |= 0x80
-        block_spikes = 2
         base.Character.GettingHurt()
         char.protection_flag = protection_temp
-        block_spikes = 3
+        // There's no need to reset most of the ability states, since this will put us in the HURT base state,
+        // and that will make the hook to baseUpdate() reset everything.
         hammer_drop_state = 0
         bouncy_ball_state = 0
+        // Increase block_spikes so that the above hooks don't clear it and the state will linger.
+        block_spikes = 2
     }
     else
     {
+        // If block_spikes == 1 but this branch was reached anyway, the above hooks will safely clear it.
         base.Character.GettingHurt()
     }
 }
@@ -639,8 +772,10 @@ function void Character.GettingHurt()
 function void Character.HurtCheckForStateChange()
 {
     base.Character.HurtCheckForStateChange()
-    if (isMighty() && char.base_state == base_state.NORMAL && block_spikes == 3)
+    // If the HURT state just ended and the damage we took was from blocked spikes...
+    if (isMighty() && char.base_state == base_state.NORMAL && block_spikes == 2)
     {
+        // Shorten the invulnerability.
         char.invuln.countdown = 30
         block_spikes = 0
     }
@@ -650,9 +785,12 @@ function void Character.HurtCheckForStateChange()
 ///      WIN POSE      ///
 //////////////////////////
 
+//TODO: Now that bouncing happens at the end of the frame instead of during, could this whole section be removed?
+
 //# address-hook(0x083912) end(0x083936)
 function void fn083912()
 {
+    // Signpost
     waiting_for_win_pose = 1
     base.fn083912()
 }
@@ -702,7 +840,7 @@ function void updateWinPose()
     }
 	else
 	{
-        // Reset when not in win-pose
+        // Reset when not in win-pose.
         mighty_wp_timer = 0
         mighty_wp_frame = 0
 	}
