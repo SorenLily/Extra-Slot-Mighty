@@ -1,6 +1,11 @@
 global bool is_mighty
 global u64 save_slot_data
 
+// TODO: Need to make the entire act select work.
+// TODO: is 
+
+// NOTE: 0xffffa6ec is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
+
 function u32 getEmptyBuffer(u32 bytes)
 {
 	// Find an empty buffer in shared memory to store data.
@@ -23,11 +28,17 @@ function u32 getEmptyBuffer(u32 bytes)
 
 function void DataSelect.setup()
 {
-	// This needs to be cleared if the player starts a game and then exits back to the main menu.
+	// is_mighty needs to be cleared if the player starts a game and then exits back to the main menu.
 	// There are other places to put this, but I think here makes sense.
+	// TODO: Actually, this does not account for act select. So this probably does need to be moved.
 	is_mighty = 0
 	u32 buffer_address = getEmptyBuffer(9)
+	// The save data payload is only 1 byte; each save file gets 1 bit which is on/off if it's a mighty file.
+	// TODO: Can this structure handle modded partner characters?
 	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+	// For each bit in the save data payload, turn it into 8 bytes and concatenate them together into a u64.
+	// This is relevant when considering multiple extra slot framework characters being loaded at once.
+	// TODO: Actually, is it? It's not possible for one save file to be assigned more than 1 extra slot character.
 	for (u8 i = 0; i < 8; i++)
 	{
 		if (u8[buffer_address] & (1 << i))
@@ -36,6 +47,7 @@ function void DataSelect.setup()
 		}
 	}
 	save_slot_data = u64[buffer_address + 1]
+	// Clear shared memory buffer.
 	u8[buffer_address] = 0
 	u64[buffer_address + 1] = 0
 	base.DataSelect.setup()
@@ -57,7 +69,7 @@ function void fn00d1fa()
 			// This is needed in case the player turns off the mod while in the main menu.
 			if ((u8[address + 0x02] >> 4) > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
 			{
-				// Upper 4 bits store the character value; set it to 3 (KNUCKLES_ALONE).
+				// Upper 4 bits store the character value; set it to 1 (SONIC_ALONE).
 				u8[address + 0x02] = u8[address + 0x02] & 0xf + 0x10
 			}
 			address += 0xa
@@ -71,16 +83,16 @@ function void fn00d1fa()
 //# address-hook(0x00d39e) end(0x00d426)
 function void fn00d39e()
 {
-	u32 address = 0xffffe6ac + (u32(objA0.flags2e) * 10)
 	base.fn00d39e()
+	// Getting a buffer here is not strictly necessary, but it makes the next operation much easier.
+	// TODO: Then again, if save_slot_data is not necessary, then neither is this.
 	u32 buffer_address = getEmptyBuffer(8)
 	u64[buffer_address] = save_slot_data
-
+	// If this slot is a mighty file...
 	if (u8[buffer_address + objA0.flags2e] >= 1)
 	{
-		debugLog("Adjust save slot char on init")
-		//debugLog()
-		u8[A0 + 0x35] = u8[A0 + 0x35] + 2
+		// Adjust the save slot's character value.
+		u8[A0 + 0x35] += 2
 	}
 	u64[buffer_address] = 0
 }
@@ -89,41 +101,51 @@ function void fn00d39e()
 //# address-hook(0x00d42c) end(0x00d69a)
 function void fn00d42c()
 {
+	// This "filler byte" is apparently unused in the original game. Sonic 3 AIR uses it as a random number seed.
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3
 	base.fn00d42c()
+	// If the filler byte has changed, then a new game has been initialized. If an extra slot character was selected...
 	if (filler_byte_temp != u8[A1 + 0x01] && u8[A0 + 0x35] > max_characters)
 	{
-		debugLog("New game started as Mighty")
+		// The game cannot handle a character value above 3 (or maybe 4), so make sure it's in bounds.
+		// TODO: This needs to account for multiple extra slot characters.
 		levelselect.characters = u8[A0 + 0x35] - 2
+		// Also adjust the saved character value. We don't want to actually store an irregular value in the save file,
+		// otherwise turning the mod off would leave it corrupted. Instead, we store extra persistentdata.
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
 		SaveGameSlot()
 	}
 }
 
-// THIS FUNCTION IS NOT A BOOL. Even though its signature says "bool", it can return 0, 1, or 2.
+// NOTE: THIS FUNCTION IS NOT A BOOL. Even though its signature says "bool", it can return 0, 1, or 2.
 function bool fn00d458()
 {
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	// If this is true, we're starting a game on a new save file as an extra slot character.
 	if ((result == 1) && (u8[A0 + 0x35] > max_characters) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
-		debugLog("Save extra persistent data")
-		// Compute address of extra save slot data.
-
+		// We need to mark that this file is an extra slot character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(1)
+		// TODO: This loop will not work for multiple extra slot characters.
 		for (u8 i = 0; i < 8; i++)
 		{
+			// Loop through each save slot object and check their character value. Set a bit if so.
 			u8[buffer_address] |= ((u8[0xffffb128 + 0x35 + 0x4a*i] > max_characters) ? 1 : 0) << i
 		}
 		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
-		is_mighty = 1
+		// Clear the buffer.
 		u8[buffer_address] = 0
+		// We are playing as mighty.
+		is_mighty = 1
 	}
+	// If this is true, we are starting a game on an existing save file.
 	else if (result == 0)
 	{
-		debugLog("Load extra persistent data")
+		// We need load the extra persistent data and check if this is a mighty file.
+
 		// Compute address of extra save slot data.
 		u32 buffer_address = getEmptyBuffer(1)
 		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
@@ -131,9 +153,12 @@ function bool fn00d458()
 		// Check extra save slot data to see if this is a Mighty save.
 		if (u8[buffer_address] & (1 << slot_index))
 		{
+			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
+			// TODO: The line below will not work for multiple extra slot characters.
 			levelselect.characters = u8[A0 + 0x35] - 2
 			is_mighty = 1
 		}
+		// Clear the buffer.
 		u8[buffer_address] = 0
 	}
 	return result
@@ -142,8 +167,10 @@ function bool fn00d458()
 //# address-hook(0x00d6d0) end(0x00d70a)
 function void fn00d6d0()
 {
-	// Character Selection: Allow for selecting higher than the normal maximum character
+	// Character Selection: Allow for selecting higher than the normal maximum character.
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
+	// D0.u16 is used as the character index for this function.
+	// TODO: This does not work for multiple extra slot characters.
 	if (D0.u16 >= max_characters)
 	{
 		D0.u16 -= 2
@@ -169,6 +196,8 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 		//debugLog(index)
 		if (u8[A0 + 0x35] > max_characters)
 		{
+			// TODO: These indicies only works for character values of 5 and 6. It needs to be able to account for more
+			// extra slot characters.
 			if (index == 0xa351 || index == 0xa35a)
 			{
 				if (index == 0xa35a)
@@ -182,10 +211,13 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 					px -= 8
 				}
 				renderQueue++
+				// Draw Mighty's portrait.
 				SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (index == 0xa35a ? px+26 : px+8), py+35, renderQueue)
 				spr1.setFlipX(index == 0xa35a)
+				// If this is not a new save slot...
 				if (!(u8[u32[A0 + 0x30]] & 0x80))
 				{
+					// Draw the life and continue sprites.
 					SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+4, py+80, renderQueue)
 					SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
 					SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
@@ -205,6 +237,7 @@ function void fn001506()
 		if (u8[A3 + 0x35] > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
+			// TODO: I'm not sure this is a good way to do this.
 			return
 		}
 	}
@@ -216,9 +249,11 @@ function void fn00d8c4()
 {
 	u16 data_temp = u16[A1]
 	base.fn00d8c4()
+	// If this is true, the save slot data was cleared.
 	if (u16[A1] == 0x8000 && data_temp != 0x8000)
 	{
-		// Clear the flag that this is a mighty save slot from persistentdata.
+		// Clear the bit marking this is a mighty save slot from persistentdata.
+		// TODO: If the player turns the mod off, then clears a save slot, it will still be marked as a mighty save.
 		debugLog("Clear Data")
 		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 		u32 buffer_address = getEmptyBuffer(1)
