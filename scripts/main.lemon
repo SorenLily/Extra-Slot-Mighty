@@ -4,6 +4,7 @@ include rendercharacter
 include mightyabilities
 
 constant string CHAR_KEY = "Mighty"
+constant u8 CHARACTER_BASE = 3
 
 function void UpdateGameObjects()
 {
