@@ -129,7 +129,9 @@ function bool fn00d458()
 		if (u8[buffer_address] & (1 << slot_index))
 		{
 			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
-			levelselect.characters = u8[A0 + 0x35] - 2 * (extra_slot_priority & 0x7f)
+			levelselect.characters = ((extra_characters & 1) ^ (u8[A0 + 0x35] & 1))
+			if (CHARACTER_BASE == 3)
+				levelselect.characters = 4 - levelselect.characters
 			is_mighty = 1
 		}
 		// Clear the buffer.
@@ -176,6 +178,23 @@ function void fn00d6d0()
 	}
 }
 
+//# address-hook(0x00d30c) end(0x00d39a)
+function void fn00d30c()
+{
+	base.fn00d30c()
+	u8 extra_characters = ((Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3) + 2 * (extra_slot_priority & 0x7f)
+	if ((dataselect.slot_selected == 0) && ((levelselect.characters == extra_characters) || (levelselect.characters == (extra_characters - 1))))
+	{
+		levelselect.characters = ((extra_characters & 1) ^ (dataselect.nosave_characters & 1))
+		if (CHARACTER_BASE == 3)
+			levelselect.characters = 4 - levelselect.characters
+		is_mighty = 1
+	}
+
+	if (objA0.animation.sprite > 8)
+		objA0.animation.sprite = 8
+}
+
 function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 index, u16 renderQueue, u8 spriteCounter)
 {
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
@@ -186,13 +205,19 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 	}
 
-	if ((u8[A0 + 0x35] != extra_chars) && (u8[A0 + 0x35] != (extra_chars - 1)))
+	u8 selected_char = 0
+	if (objA0.update_address == 0x00d42c)
+		selected_char = u8[A0 + 0x35]
+	else
+		selected_char = dataselect.nosave_characters
+	
+	if ((selected_char != extra_chars) && (selected_char != (extra_chars - 1)))
 	{
 		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 	}
 	if (index == 0xa342)
 	{
-		bool with_tails = (u8[A0 + 0x35] == extra_chars)
+		bool with_tails = (selected_char == extra_chars)
 		if (with_tails)
 		{
 			// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
@@ -208,7 +233,7 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 		SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (with_tails ? px+42 : px+16), py+35, renderQueue)
 		spr1.setFlipX(with_tails)
 		// If this is not a new save slot...
-		if (!(u8[u32[A0 + 0x30]] & 0x80))
+		if (!(u8[u32[A0 + 0x30]] & 0x80) && (objA0.update_address == 0x00d42c))
 		{
 			// Draw the life and continue sprites.
 			SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+12, py+80, renderQueue)
