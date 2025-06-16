@@ -79,26 +79,24 @@ function void fn00d42c()
 {
 	// This "filler byte" is apparently unused in the original game. Sonic 3 AIR uses it to store a random number seed.
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
-	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3
+	u8 extra_characters = ((Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3) + 2 * (extra_slot_priority & 0x7f)
 	base.fn00d42c()
-	// If the filler byte has changed, then a new game has been initialized. If an extra slot character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && u8[A0 + 0x35] > max_characters && (extra_slot_priority & 0x80))
+	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
+	if (filler_byte_temp != u8[A1 + 0x01] && (u8[A0 + 0x35] == extra_characters || u8[A0 + 0x35] == (extra_characters - 1)))
 	{
 		// The game cannot handle a character value above 3 (or maybe 4), so make sure it's in bounds.
-		// This is 0 if the extra slot character is paired with Tails, and 1 if not.
-		levelselect.characters = ((max_characters & 1) ^ (u8[A0 + 0x35] & 1))
+		// This is 0 if the ES character is paired with Tails, and 1 if not.
+		levelselect.characters = ((extra_characters & 1) ^ (u8[A0 + 0x35] & 1))
+		// Also adjust the saved character value. We don't want to actually store an irregular value in the save file.
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
 		if (CHARACTER_BASE == 3)
 			levelselect.characters = 4 - levelselect.characters
-		// Also adjust the saved character value. We don't want to actually store an irregular value in the save file,
-		// otherwise turning the mod off would leave it corrupted. Instead, we store extra persistentdata in the next hook.
 		SaveGameSlot()
 	}
 
+	// Also, cap this value to simplify the logic for drawing the character portrait and icons.
 	if (objA0.animation.sprite > 8)
-	{
 		objA0.animation.sprite = 8
-	}
 }
 
 // NOTE: This function is not a bool. Even though its signature says "bool", it can return 0, 1, or 2.
@@ -108,10 +106,10 @@ function bool fn00d458()
 	u8 result = base.fn00d458()
 	u8 extra_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3) + (extra_slot_priority & 0x7f) * 2
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
-	// If this is true, we're starting a game on a new save file as an extra slot character.
+	// If this is true, we're starting a game on a new save file as an ES character.
 	if ((result == 1) && ((u8[A0 + 0x35] == extra_characters) || (u8[A0 + 0x35] == extra_characters - 1)) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
-		// We need to mark that this file is an extra slot character in the persistent data.
+		// We need to mark that this file is an ES character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(1)
 		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		u8[buffer_address] |= 1 << slot_index
@@ -192,8 +190,6 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 	{
 		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 	}
-	// TODO: These indicies only works for character values of 5 and 6. It needs to be able to account for more
-	// extra slot characters.
 	if (index == 0xa342)
 	{
 		bool with_tails = (u8[A0 + 0x35] == extra_chars)
