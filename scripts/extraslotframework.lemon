@@ -94,6 +94,11 @@ function void fn00d42c()
 		// otherwise turning the mod off would leave it corrupted. Instead, we store extra persistentdata in the next hook.
 		SaveGameSlot()
 	}
+
+	if (objA0.animation.sprite > 8)
+	{
+		objA0.animation.sprite = 8
+	}
 }
 
 // NOTE: This function is not a bool. Even though its signature says "bool", it can return 0, 1, or 2.
@@ -138,20 +143,34 @@ function bool fn00d458()
 //# address-hook(0x00d6d0) end(0x00d70a)
 function void fn00d6d0()
 {
+	// Have only the bottom priority mod handle this.
+	if (!(extra_slot_priority & 0x80))
+	{
+		base.fn00d6d0()
+		return
+	}
 	// Character Selection: Allow for selecting higher than the normal maximum character.
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	// D0.u16 is used as the character index for this function.
-	// TODO: This does not work for multiple extra slot characters.
 	if (D0.u16 >= max_characters)
 	{
-		D0.u16 -= 2
+		u16 d0_temp = D0.u16
+		D0.u16 = 1
 		base.fn00d6d0()
-		D0.u16 += D0.u16 ? 2 : 0
+		s16 diff = D0.u16 - 1
+		D0.u16 = d0_temp + diff
+		if (D0.u16 > (max_characters + 2 * (extra_slot_priority & 0x7f)))
+		{
+			D0.u16 = 0
+		}
 	}
 	else if (D0.u16 == 0)
 	{
 		base.fn00d6d0()
-		D0.u16 += (D0.u16 == max_characters) ? 2 : 0
+		if (D0.u16 == max_characters)
+		{
+			D0.u16 += 2 * (extra_slot_priority & 0x7f)
+		}
 	}
 	else
 	{
@@ -162,41 +181,50 @@ function void fn00d6d0()
 function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 index, u16 renderQueue, u8 spriteCounter)
 {
 	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
-	if ((objA0.update_address == 0x00d30c || objA0.update_address == 0x00d42c) )//&& (u8[A0 + 0x35] > max_characters))
+	u8 extra_chars = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3) + (extra_slot_priority & 0x7f) * 2
+
+	if ((objA0.update_address != 0x00d30c && objA0.update_address != 0x00d42c))
 	{
-		//debugLog(index)
-		if (u8[A0 + 0x35] > max_characters)
+		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
+	}
+
+	if ((u8[A0 + 0x35] != extra_chars) && (u8[A0 + 0x35] != (extra_chars - 1)))
+	{
+		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
+	}
+	// TODO: These indicies only works for character values of 5 and 6. It needs to be able to account for more
+	// extra slot characters.
+	if (index == 0xa342)
+	{
+		bool with_tails = (u8[A0 + 0x35] == extra_chars)
+		if (with_tails)
 		{
-			// TODO: These indicies only works for character values of 5 and 6. It needs to be able to account for more
-			// extra slot characters.
-			if (index == 0xa351 || index == 0xa35a)
-			{
-				if (index == 0xa35a)
-				{
-					// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
-					u16 attributes = sprite_attribute.PRIORITY | sprite_attribute.PALETTE.LINE1 | sprite_attribute.FLIP_X
-					Renderer.drawVdpSprite(px+12, py+30, 0x00, attributes | 0x031d, renderQueue)
-					Renderer.drawVdpSprite(px+4,  py+38, 0x0d, attributes | 0x031e, renderQueue)
-					Renderer.drawVdpSprite(px+12, py+54, 0x0d, attributes | 0x0326, renderQueue)
-					Renderer.drawVdpSprite(px+4,  py+62, 0x00, attributes | 0x032e, renderQueue)
-					px -= 8
-				}
-				renderQueue++
-				// Draw Mighty's portrait.
-				SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (index == 0xa35a ? px+26 : px+8), py+35, renderQueue)
-				spr1.setFlipX(index == 0xa35a)
-				// If this is not a new save slot...
-				if (!(u8[u32[A0 + 0x30]] & 0x80))
-				{
-					// Draw the life and continue sprites.
-					SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+4, py+80, renderQueue)
-					SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+80, renderQueue)
-					SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+12, py+108, renderQueue)
-					SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+20, py+104, renderQueue)
-				}
-				return true
-			}	
+			// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
+			u16 attributes = sprite_attribute.PRIORITY | sprite_attribute.PALETTE.LINE1 | sprite_attribute.FLIP_X
+			Renderer.drawVdpSprite(px+28, py+30, 0x00, attributes | 0x031d, renderQueue)
+			Renderer.drawVdpSprite(px+20, py+38, 0x0d, attributes | 0x031e, renderQueue)
+			Renderer.drawVdpSprite(px+28, py+54, 0x0d, attributes | 0x0326, renderQueue)
+			Renderer.drawVdpSprite(px+20, py+62, 0x00, attributes | 0x032e, renderQueue)
+			px -= 8
 		}
+		renderQueue++
+		// Draw mighty's portrait.
+		SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (with_tails ? px+42 : px+16), py+35, renderQueue)
+		spr1.setFlipX(with_tails)
+		// If this is not a new save slot...
+		if (!(u8[u32[A0 + 0x30]] & 0x80))
+		{
+			// Draw the life and continue sprites.
+			SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+12, py+80, renderQueue)
+			SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+28, py+80, renderQueue)
+			SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+20, py+108, renderQueue)
+			SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+28, py+104, renderQueue)
+		}
+		return true
+	}
+	else if (index == 0xa34e)
+	{
+		return true
 	}
 	return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 }
