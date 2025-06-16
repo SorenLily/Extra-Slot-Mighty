@@ -43,11 +43,15 @@ function u32 getEmptyBuffer(u32 bytes)
 	return buffer_address
 }
 
+function void Game.returnToMainMenu()
+{
+	// TODO: This does not really work in v24 of Sonic 3 AIR, we need a later version where the pause menu is moddable.
+	is_mighty = 0
+	base.Game.returnToMainMenu()
+}
+
 function void DataSelect.setup()
 {
-	// is_mighty needs to be cleared if the player starts a game and then exits back to the main menu.
-	// There are other places to put this, but I think here makes sense.
-	// TODO: Actually, this does not account for act select. So this probably does need to be moved.
 	is_mighty = 0
 	count(0)
 	u32 buffer_address = getEmptyBuffer(1)
@@ -160,17 +164,13 @@ function void fn00d6d0()
 		s16 diff = D0.u16 - 1
 		D0.u16 = d0_temp + diff
 		if (D0.u16 > (max_characters + 2 * (extra_slot_priority & 0x7f)))
-		{
 			D0.u16 = 0
-		}
 	}
 	else if (D0.u16 == 0)
 	{
 		base.fn00d6d0()
 		if (D0.u16 == max_characters)
-		{
 			D0.u16 += 2 * (extra_slot_priority & 0x7f)
-		}
 	}
 	else
 	{
@@ -306,13 +306,6 @@ function void DataSelect.update()
 //# address-hook(0x00d1fa) end(0x00d30a)
 function void fn00d1fa()
 {
-	// This is the update function of an object that seems to be the main "dataselect controller".
-	if (u16[0xffffeee4] == 0 && (control.pad1.pressed & CONTROL_B || Input.buttonPressed(BUTTON_BACK)))
-	{
-		// If we get here, the base function will call Game.returnToMainMenu() and yieldexecution().
-		// Once this happens, it is very hard to get any modded code to run until we re-enter the dataselect
-		// screen. So this is a good place to do any cleanup needed before exiting to main menu.
-	}
 	base.fn00d1fa()
 }
 
