@@ -20,7 +20,7 @@ global bool is_mighty
 global u8 save_slot_data
 
 // TODO: Need to make the entire act select work.
-// NOTE: 0xffffa6ec is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
+// NOTE: 0xffffe6ac is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
 
 // Helper function
 function u32 getEmptyBuffer(u32 bytes)
@@ -114,9 +114,9 @@ function bool fn00d458()
 	if ((result == 1) && ((u8[A0 + 0x35] == extra_characters) || (u8[A0 + 0x35] == extra_characters - 1)) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// We need to mark that this file is an ES character in the persistent data.
+		save_slot_data |= 1 << slot_index
 		u32 buffer_address = getEmptyBuffer(1)
-		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
-		u8[buffer_address] |= 1 << slot_index
+		u8[buffer_address] = save_slot_data
 		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		// Clear the buffer.
 		u8[buffer_address] = 0
@@ -126,11 +126,8 @@ function bool fn00d458()
 	// If this is true, we are starting a game on an existing save file.
 	else if (result == 0)
 	{
-		// We need load the extra persistent data and check if this is a mighty file.
-		u32 buffer_address = getEmptyBuffer(1)
-		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
 		// Check extra save slot data to see if this is a Mighty save.
-		if (u8[buffer_address] & (1 << slot_index))
+		if (save_slot_data & (1 << slot_index))
 		{
 			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
 			levelselect.characters = ((extra_characters & 1) ^ (u8[A0 + 0x35] & 1))
@@ -138,8 +135,6 @@ function bool fn00d458()
 				levelselect.characters = 4 - levelselect.characters
 			is_mighty = 1
 		}
-		// Clear the buffer.
-		u8[buffer_address] = 0
 	}
 	return result
 }
@@ -286,13 +281,6 @@ function void fn00d8c4()
 ///////////////////////////////
 ///		 DOCUMENTATION		///
 ///////////////////////////////
-
-//# address-hook(0x00c570) end(0x00c860)
-function void DataSelectScreen()
-{
-	// This hook straight up does not work. Any code added here will not be run.
-	base.DataSelectScreen()
-}
 
 function void DataSelect.update()
 {
