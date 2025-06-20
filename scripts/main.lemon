@@ -5,6 +5,7 @@ include mightyabilities
 
 constant string CHAR_KEY = "Mighty"
 constant u8 CHARACTER_BASE = 3
+constant u8 IS_PARTNER = 0
 
 function void UpdateGameObjects()
 {

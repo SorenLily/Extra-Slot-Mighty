@@ -1,6 +1,6 @@
 function string getCharacterPaletteKey(u8 character)
 {
-	if (is_mighty && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_KNUCKLES)
 	{
 		return "mighty_palette"
 	}
@@ -9,7 +9,7 @@ function string getCharacterPaletteKey(u8 character)
 
 function string getCharacterBluesphereSpriteKey(u8 character)
 {
-	if (is_mighty && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_KNUCKLES)
 	{
 		return "bluesphere_mighty"
 	}
@@ -18,7 +18,7 @@ function string getCharacterBluesphereSpriteKey(u8 character)
 
 function string getCharacterBluespherePaletteKey(u8 character)
 {
-	if (is_mighty && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_KNUCKLES)
 	{
 		return "mightyBS_palette"
 	}
@@ -27,7 +27,7 @@ function string getCharacterBluespherePaletteKey(u8 character)
 
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
-	if (objA0.update_address == 0x016444 && is_mighty)
+	if (objA0.update_address == 0x016444 && is_ES)
 	{
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
@@ -92,7 +92,7 @@ function u8 getCharSpriteIndex()
 
 function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 {
-	if (is_mighty && (objA0.update_address == 0x0837b2) && (objA0.animation.sprite == 0x02))
+	if (is_ES && (objA0.update_address == 0x0837b2) && (objA0.animation.sprite == 0x02))
 	{
 		SpriteHandle spr = Renderer.addSpriteHandle("mighty_signpost", px, py, renderQueue)
 		spr.setFlipX(objA0.render_flags & render_flag.FLIP_X)
