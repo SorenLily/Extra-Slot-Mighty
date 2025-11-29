@@ -80,7 +80,10 @@ function void fn00d39e()
 	{
 		u8 max_characters = Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3
 		// Adjust the save slot's character value.
-		u8[A0 + 0x35] =  max_characters + (1 + extra_partner_count) * (extra_slot_priority & 0x7f) - (u8[A0 + 0x35] & 1)
+		if (!IS_PARTNER)
+		{
+			u8[A0 + 0x35] += max_characters + (extra_partner_count) * ((extra_slot_priority & 0x7f) - 1)
+		}
 	}
 }
 
@@ -91,13 +94,14 @@ function void fn00d42c()
 	// This "filler byte" is apparently unused in the original game. Sonic 3 AIR uses it to store a random number seed.
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	u8 extra_characters = ((Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
+	u8 char_alone = extra_characters - extra_partner_count
 	base.fn00d42c()
 	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (u8[A0 + 0x35] == extra_characters || u8[A0 + 0x35] == (extra_characters - 1)))
+	if (filler_byte_temp != u8[A1 + 0x01] && (u8[A0 + 0x35] >= char_alone && u8[A0 + 0x35] <= extra_characters))
 	{
 		// The game cannot handle a character value above 3 (or maybe 4), so make sure it's in bounds.
 		// This is 0 if the ES character is paired with Tails, and 1 if not.
-		levelselect.characters = ((extra_characters & 1) ^ (u8[A0 + 0x35] & 1))
+		levelselect.characters = (u8[A0 + 0x35] == char_alone) ? 1 : 0
 		// Also adjust the saved character value. We don't want to actually store an irregular value in the save file.
 		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
 		if (CHARACTER_BASE == 3)
@@ -116,9 +120,10 @@ function bool fn00d458()
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
 	u8 extra_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
+	u8 char_alone = extra_characters - extra_partner_count
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && ((u8[A0 + 0x35] == extra_characters) || (u8[A0 + 0x35] == extra_characters - 1)) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && ((u8[A0 + 0x35] >= char_alone && u8[A0 + 0x35] <= extra_characters)) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// We need to mark that this file is an ES character in the persistent data.
 		save_slot_data |= 1 << slot_index
@@ -137,7 +142,7 @@ function bool fn00d458()
 		if (save_slot_data & (1 << slot_index))
 		{
 			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
-			levelselect.characters = ((extra_characters & 1) ^ (u8[A0 + 0x35] & 1))
+			levelselect.characters = (u8[A0 + 0x35] == char_alone) ? 1 : 0
 			if (CHARACTER_BASE == 3)
 				levelselect.characters = 4 - levelselect.characters
 			is_ES = 1
@@ -239,11 +244,10 @@ function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 in
 				Renderer.drawVdpSprite(px+28, py+54, 0x0d, attributes | 0x0326, renderQueue)
 				Renderer.drawVdpSprite(px+20, py+62, 0x00, attributes | 0x032e, renderQueue)
 			}
-			px -= 8
 		}
 		renderQueue++
 		// Draw mighty's portrait.
-		SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (is_alone ? px+16 : px+42), py+35, renderQueue)
+		SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (is_alone ? px+16 : px+34), py+35, renderQueue)
 		spr1.setFlipX(!is_alone)
 		// If this is not a new save slot...
 		if (!(u8[u32[A0 + 0x30]] & 0x80) && (objA0.update_address == 0x00d42c))
