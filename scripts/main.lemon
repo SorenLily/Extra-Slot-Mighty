@@ -3,11 +3,21 @@ include extraslotframework
 include rendercharacter
 include mightyabilities
 
-constant string CHAR_KEY = "Mighty"
+constant string UNIQUE_ID = "soren lily mighty"
+
+constant string CHAR_KEY = "mighty"
 constant u8 CHARACTER_BASE = 3
 constant u8 IS_PARTNER = 0
 
 function void UpdateGameObjects()
 {
 	base.UpdateGameObjects()
+}
+
+function string getESChar()
+{
+	if (is_ES)
+		return UNIQUE_ID
+	else
+		return base.getESChar()
 }

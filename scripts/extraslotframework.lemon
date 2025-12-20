@@ -1,28 +1,45 @@
-global u8 extra_slot_priority
-global u8 extra_partner_count
-global u8 extra_partner_slot
-
-function u8 count(u32 address)
-{
-	u8[address + IS_PARTNER] += 1
-	if (!IS_PARTNER)
-		extra_slot_priority = u8[address]
-	else
-		extra_partner_slot = 1 + u8[address + 1]
-	u8 result = base.count(address)
-	if (result == 0)
-	{
-		extra_slot_priority |= 0x80
-		result = u8[address]
-	}
-	if (IS_PARTNER)
-		extra_slot_priority |= u8[address]	
-	extra_partner_count = 1 + u8[address + 1]
-	return result
-}
+global u32 my_char_slot
+global u32 max_char_slot
+global u32 max_partner_slot
+global bool is_highest_priority
 
 global bool is_ES
-global u8 save_slot_data
+global u32 save_slot_data
+global bool new_game_started
+
+function void Init()
+{
+	if (my_char_slot == 0)
+	{
+		u32 buffer = getEmptyBuffer(8)
+		count(buffer)
+		u64[buffer] = 0
+	}
+	is_ES = 0
+	save_slot_data = 0
+	new_game_started = 0
+	base.Init()
+}
+
+function void count(u32 address)
+{
+	if (u64[address] == 0)
+	{
+		u32[address] = 2
+		u32[address + 4] = 1
+		is_highest_priority = true
+	}
+	u32[address + IS_PARTNER * 4] += 1
+	if (!IS_PARTNER)
+		my_char_slot = u32[address]
+	else
+		my_char_slot = u32[address + 4]
+	
+	base.count(address)
+
+	max_char_slot = u32[address]	
+	max_partner_slot = u32[address + 4]
+}
 
 // TODO: Need to make the entire act select work.
 // NOTE: 0xffffe6ac is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
@@ -48,25 +65,14 @@ function u32 getEmptyBuffer(u32 bytes)
 	return buffer_address
 }
 
-function void Game.returnToMainMenu()
-{
-	// TODO: This does not really work in v24 of Sonic 3 AIR, we need a later version where the pause menu is moddable.
-	is_ES = 0
-	base.Game.returnToMainMenu()
-}
-
 function void DataSelect.setup()
 {
-	is_ES = 0
-	u32 buffer_address = getEmptyBuffer(2)
-	if (extra_slot_priority == 0)
-		count(buffer_address)
-	u16[buffer_address] = 0
-	// The save data payload is only 1 byte; each save file gets 1 bit which is on/off if it's a mighty file.
-	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
-	save_slot_data = u8[buffer_address]
+	u32 buffer_address = getEmptyBuffer(4)
+	// Each save file gets 1 bit which is on/off if it's a file with this extra slot character.
+	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+	save_slot_data = u32[buffer_address]
 	// Clear shared memory buffer.
-	u8[buffer_address] = 0
+	u32[buffer_address] = 0
 	base.DataSelect.setup()
 }
 
@@ -78,12 +84,24 @@ function void fn00d39e()
 	// If this slot is a mighty file...
 	if (save_slot_data & (1 << objA0.flags2e))
 	{
-		u8 max_characters = Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3
-		// Adjust the save slot's character value.
+		debugLog(CHAR_KEY)
+		// Initialize the save slot object with the correct extra slot values.
 		if (!IS_PARTNER)
-		{
-			u8[A0 + 0x35] += max_characters + (extra_partner_count) * ((extra_slot_priority & 0x7f) - 1)
-		}
+			u32[A0 + 0x40] = my_char_slot
+		else
+			u32[A0 + 0x44] = my_char_slot
+	}
+
+	if (is_highest_priority)
+	{
+		u8 char = u8[u32[A0 + 0x30] + 0x02] >> 4
+		constant array<u8> char_array = { 0, 0, 1, 2, 2 }
+		
+		if (u32[A0 + 0x40] == 0)
+			u32[A0 + 0x40] = char_array[char]
+
+		if (u32[A0 + 0x44] == 0 && char == 4)
+			u32[A0 + 0x44] = 1
 	}
 }
 
@@ -93,25 +111,16 @@ function void fn00d42c()
 {
 	// This "filler byte" is apparently unused in the original game. Sonic 3 AIR uses it to store a random number seed.
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
-	u8 extra_characters = ((Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
-	u8 char_alone = extra_characters - extra_partner_count
 	base.fn00d42c()
 	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (u8[A0 + 0x35] >= char_alone && u8[A0 + 0x35] <= extra_characters))
+	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == u32[A0 + 0x40]) && !IS_PARTNER)
 	{
-		// The game cannot handle a character value above 3 (or maybe 4), so make sure it's in bounds.
-		// This is 0 if the ES character is paired with Tails, and 1 if not.
-		levelselect.characters = (u8[A0 + 0x35] == char_alone) ? 1 : 0
-		// Also adjust the saved character value. We don't want to actually store an irregular value in the save file.
-		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
-		if (CHARACTER_BASE == 3)
+		if (CHARACTER_BASE == 1)
 			levelselect.characters = 4 - levelselect.characters
+		// Also adjust the saved character value.
+		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
 		SaveGameSlot()
 	}
-
-	// Also, cap this value to simplify the logic for drawing the character portrait and icons.
-	if (objA0.animation.sprite > 8)
-		objA0.animation.sprite = 8
 }
 
 // NOTE: This function is not a bool. Even though its signature says "bool", it can return 0, 1, or 2.
@@ -119,19 +128,19 @@ function bool fn00d458()
 {
 	// NOTE: If you want to allow Tails and Knuckles to select any stage, this is the function that needs to be modified.
 	u8 result = base.fn00d458()
-	u8 extra_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
-	u8 char_alone = extra_characters - extra_partner_count
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && ((u8[A0 + 0x35] >= char_alone && u8[A0 + 0x35] <= extra_characters)) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + IS_PARTNER * 4]) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
-		// We need to mark that this file is an ES character in the persistent data.
+		// Mark that this file is an ES character in the persistent data.
+		u32 buffer_address = getEmptyBuffer(4)
 		save_slot_data |= 1 << slot_index
-		u32 buffer_address = getEmptyBuffer(1)
-		u8[buffer_address] = save_slot_data
-		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
+		u32[buffer_address] = save_slot_data
+		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
 		// Clear the buffer.
-		u8[buffer_address] = 0
+		u32[buffer_address] = 0
+		// Set this flag to prevent a rendering issue.
+		new_game_started = true
 		// Mark that are playing as mighty.
 		is_ES = 1
 	}
@@ -142,8 +151,7 @@ function bool fn00d458()
 		if (save_slot_data & (1 << slot_index))
 		{
 			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
-			levelselect.characters = (u8[A0 + 0x35] == char_alone) ? 1 : 0
-			if (CHARACTER_BASE == 3)
+			if (CHARACTER_BASE == 1)
 				levelselect.characters = 4 - levelselect.characters
 			is_ES = 1
 		}
@@ -154,134 +162,149 @@ function bool fn00d458()
 //# address-hook(0x00d6d0) end(0x00d70a)
 function void fn00d6d0()
 {
-	// Have only the bottom priority mod handle this.
-	if (!(extra_slot_priority & 0x80))
+	// Have only the highest priority mod handle this.
+	if (!is_highest_priority)
 	{
 		base.fn00d6d0()
 		return
 	}
 	// Character Selection: Allow for selecting higher than the normal maximum character.
-	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
 	// D0.u16 is used as the character index for this function.
-	if (D0.u16 >= max_characters)
+	u16 d0_temp = D0.u16
+	D0.u16 = 1
+	base.fn00d6d0()
+	// Diff will be -1, 0, or 1, indicating if the slot moved down, stayed still, or moved up.
+	s16 diff = D0.u16 - 1
+	if (diff == 0)
 	{
-		u16 d0_temp = D0.u16
-		D0.u16 = 1
-		base.fn00d6d0()
-		s16 diff = D0.u16 - 1
-		D0.u16 = d0_temp + diff
-		if (D0.u16 > (max_characters + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)))
-			D0.u16 = 0
+		D0.u16 = d0_temp
+		return
 	}
-	else if (D0.u16 == 0)
+	u32 char_index = u32[A0 + 0x40]
+	u32 partner_index = u32[A0 + 0x44]
+
+	if (char_index == 0)
+		diff = -diff
+	
+	partner_index += diff
+	if (partner_index == max_partner_slot + 1)
 	{
-		base.fn00d6d0()
-		if (D0.u16 == max_characters)
-			D0.u16 += (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
+		partner_index = 0
+		char_index += 1
 	}
+	else if (partner_index == ~0)
+	{
+		partner_index = max_partner_slot
+		char_index -= 1
+	}
+
+	if (char_index == max_char_slot + 1)
+	{
+		char_index = 0
+		partner_index = max_partner_slot
+	}
+	else if (char_index == ~0)
+	{
+		char_index = 1
+		partner_index = 1
+	}
+
+	if (char_index == 1 && partner_index == 0)
+	{
+		if (diff == 1)
+		{
+			char_index = max_char_slot
+			partner_index = max_partner_slot
+		}
+		else
+		{
+			char_index = 0 
+		}	
+	}
+
+	if (char_index == 2 && partner_index > 0 && !Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS))
+	{
+		partner_index = 0
+		if (diff == 1)
+		{
+			if (max_char_slot > 2)
+			{
+				char_index = 3
+			}
+			else
+			{
+				char_index = 0
+				partner_index = max_partner_slot
+			}
+		}
+	}
+
+	// Store these values in the data select object so we can reference it during rendering.
+	// These bytes are unused, so it should be fine. I'd rather do this with an array, but we don't have those.
+	u32[A0 + 0x40] = char_index
+	u32[A0 + 0x44] = partner_index
+
+	// Map the custom char values to the correct values of D0.u16
+	if (char_index == 0)
+		D0.u16 = (partner_index == 0) ? 1 : 0
+	else if (char_index == 1)
+		D0.u16 = 2
+	else if (char_index >= 2 && partner_index == 0)
+		D0.u16 = 3
 	else
+		D0.u16 = 4
+}
+
+function u8 getSelectedESCharBase()
+{
+	if (my_char_slot == u32[A0 + 0x40 + IS_PARTNER * 4])
 	{
-		base.fn00d6d0()
+		return CHARACTER_BASE
 	}
+	return base.getSelectedESCharBase()
 }
 
 //# address-hook(0x00d30c) end(0x00d39a)
 function void fn00d30c()
 {
 	base.fn00d30c()
-	u8 extra_characters = ((Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS)) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
-	if ((dataselect.slot_selected == 0) && ((levelselect.characters == extra_characters) || (levelselect.characters == (extra_characters - 1))))
-	{
-		levelselect.characters = ((extra_characters & 1) ^ (dataselect.nosave_characters & 1))
-		if (CHARACTER_BASE == 3)
-			levelselect.characters = 4 - levelselect.characters
-		is_ES = 1
-	}
-
-	if (objA0.animation.sprite > 8)
-		objA0.animation.sprite = 8
-}
-
-function bool Standalone.onDrawVdpSpriteCompound(s16 px, s16 py, u8 size, u16 index, u16 renderQueue, u8 spriteCounter)
-{
-	bool result = false
-	u8 max_characters = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3)
-	u8 extra_chars = (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3) + (1 + extra_partner_count) * (extra_slot_priority & 0x7f)
-
-	if ((objA0.update_address != 0x00d30c && objA0.update_address != 0x00d42c))
-	{
-		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
-	}
-
-	if (IS_PARTNER)
-	{
-		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
-	}
-
-	u8 selected_char = 0
-	if (objA0.update_address == 0x00d42c)
-		selected_char = u8[A0 + 0x35]
-	else
-		selected_char = dataselect.nosave_characters
+	if (!is_highest_priority)
+		return
 	
-	if (!(IS_PARTNER) && ((selected_char > extra_chars) || (selected_char <= (extra_chars - (1 + extra_partner_count)))))
+	u8 selected_char_base = getSelectedESCharBase()
+	if (selected_char_base)
 	{
-		return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
+		is_ES = 1
+		if (selected_char_base == 1)
+			levelselect.characters = 4 - levelselect.characters
 	}
-	if (index == 0xa342)
-	{
-		u8 char_alone = extra_chars - (extra_partner_count)
-		bool is_alone = selected_char == char_alone
-		drawDataselectPartner(((selected_char - 1) - max_characters) % (1 + extra_partner_count), px, py, renderQueue)
-		if (!is_alone)
-		{
-			if (selected_char == char_alone + 1)
-			{
-				// Draw Tails. This is how Sonic 3 Air does it for Knuckles + tails.
-				u16 attributes = sprite_attribute.PRIORITY | sprite_attribute.PALETTE.LINE1 | sprite_attribute.FLIP_X
-				Renderer.drawVdpSprite(px+28, py+30, 0x00, attributes | 0x031d, renderQueue)
-				Renderer.drawVdpSprite(px+20, py+38, 0x0d, attributes | 0x031e, renderQueue)
-				Renderer.drawVdpSprite(px+28, py+54, 0x0d, attributes | 0x0326, renderQueue)
-				Renderer.drawVdpSprite(px+20, py+62, 0x00, attributes | 0x032e, renderQueue)
-			}
-		}
-		renderQueue++
-		// Draw mighty's portrait.
-		SpriteHandle spr1 = Renderer.addSpriteHandle("charselect_mighty", (is_alone ? px+16 : px+34), py+35, renderQueue)
-		spr1.setFlipX(!is_alone)
-		// If this is not a new save slot...
-		if (!(u8[u32[A0 + 0x30]] & 0x80) && (objA0.update_address == 0x00d42c))
-		{
-			// Draw the life and continue sprites.
-			SpriteHandle spr2 = Renderer.addSpriteHandle("lives_icon_mighty", px+12, py+80, renderQueue)
-			SpriteHandle spr3 = Renderer.addSpriteHandle("hud_char_colon", px+28, py+80, renderQueue)
-			SpriteHandle spr4 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px+20, py+108, renderQueue)
-			SpriteHandle spr5 = Renderer.addSpriteHandle("hud_char_colon", px+28, py+104, renderQueue)
-		}
-		return true
-	}
-	else if (index == 0xa34e)
-	{
-		return true
-	}
-	return base.Standalone.onDrawVdpSpriteCompound(px, py, size, index, renderQueue, spriteCounter)
 }
 
-function void drawDataselectPartner(u8 partner_index, s16 px, s16 py, u16 renderQueue)
+function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 {
-	if (IS_PARTNER && partner_index == extra_partner_slot)
+	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !IS_PARTNER) || (my_char_slot == u32[A0 + 0x44] && IS_PARTNER && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started)
 	{
-		SpriteHandle spr = Renderer.addSpriteHandle("charselect_mighty", px+42, py+35, renderQueue)
-		spr.setFlipX(true)
+		SpriteHandle spr1 = Renderer.addSpriteHandle(stringformat("lives_icon_%s", CHAR_KEY), px-16, py+8, renderQueue)
+		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
+		SpriteHandle spr2 = Renderer.addSpriteHandle(stringformat("continue_icon_%s_wait_0x00", CHAR_KEY), px-16, py+26, renderQueue)
+		HUD.drawSprite("hud_char_colon", px, py+32, renderQueue)
 	}
-	base.drawDataselectPartner(partner_index, px, py, renderQueue)
+	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+}
+
+function string getCharacterSelectSpriteKey(u8 character)
+{
+	if (u32[A0 + 0x40 + IS_PARTNER * 4] == my_char_slot && IS_PARTNER == (character == CHARACTER_TAILS))
+		return ("charselect_" + CHAR_KEY)
+
+	return base.getCharacterSelectSpriteKey(character)
 }
 
 function void fn001506()
 {
 	if (D1 == 2 && D2 == 4)
 	{
-		if (u8[A3 + 0x35] > (Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3))
+		if ((my_char_slot == u32[A3 + 0x40] && !IS_PARTNER) || (my_char_slot == u32[A3 + 0x44] && IS_PARTNER && u32[A3 + 0x40] == 1))
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
 			// TODO: I'm not sure this is a good way to do this.
@@ -302,11 +325,12 @@ function void fn00d8c4()
 		// Clear the bit marking this is a mighty save slot from persistentdata.
 		// TODO: If the player turns the mod off, then clears a save slot, it will still be marked as a mighty save.
 		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
-		u32 buffer_address = getEmptyBuffer(1)
-		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
-		u8[buffer_address] &= ~(1 << slot_index)
-		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 1)
-		u8[buffer_address] = 0
+		u32 buffer_address = getEmptyBuffer(4)
+		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+		u32[buffer_address] &= ~(1 << slot_index)
+		save_slot_data = u32[buffer_address]
+		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+		u32[buffer_address] = 0
 	}
 }
 
