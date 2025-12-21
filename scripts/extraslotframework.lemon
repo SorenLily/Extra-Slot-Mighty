@@ -21,6 +21,11 @@ function void Init()
 	base.Init()
 }
 
+function bool isPartner()
+{
+	return (CHARACTER_BASE == 2)
+}
+
 function void count(u32 address)
 {
 	if (u64[address] == 0)
@@ -29,8 +34,8 @@ function void count(u32 address)
 		u32[address + 4] = 1
 		is_highest_priority = true
 	}
-	u32[address + IS_PARTNER * 4] += 1
-	if (!IS_PARTNER)
+	u32[address + isPartner() * 4] += 1
+	if (!isPartner())
 		my_char_slot = u32[address]
 	else
 		my_char_slot = u32[address + 4]
@@ -86,7 +91,7 @@ function void fn00d39e()
 	{
 		debugLog(CHAR_KEY)
 		// Initialize the save slot object with the correct extra slot values.
-		if (!IS_PARTNER)
+		if (!isPartner())
 			u32[A0 + 0x40] = my_char_slot
 		else
 			u32[A0 + 0x44] = my_char_slot
@@ -96,7 +101,7 @@ function void fn00d39e()
 	{
 		u8 char = u8[u32[A0 + 0x30] + 0x02] >> 4
 		constant array<u8> char_array = { 0, 0, 1, 2, 2 }
-		
+		// If an ES character was not found, we need to set the indices for the base character.
 		if (u32[A0 + 0x40] == 0)
 			u32[A0 + 0x40] = char_array[char]
 
@@ -113,7 +118,7 @@ function void fn00d42c()
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	base.fn00d42c()
 	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == u32[A0 + 0x40]) && !IS_PARTNER)
+	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == u32[A0 + 0x40]) && !isPartner())
 	{
 		if (CHARACTER_BASE == 1)
 			levelselect.characters = 4 - levelselect.characters
@@ -130,7 +135,7 @@ function bool fn00d458()
 	u8 result = base.fn00d458()
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + IS_PARTNER * 4]) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + isPartner() * 4]) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// Mark that this file is an ES character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(4)
@@ -257,7 +262,7 @@ function void fn00d6d0()
 
 function u8 getSelectedESCharBase()
 {
-	if (my_char_slot == u32[A0 + 0x40 + IS_PARTNER * 4])
+	if (my_char_slot == u32[A0 + 0x40 + isPartner() * 4])
 	{
 		return CHARACTER_BASE
 	}
@@ -282,7 +287,7 @@ function void fn00d30c()
 
 function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 {
-	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !IS_PARTNER) || (my_char_slot == u32[A0 + 0x44] && IS_PARTNER && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started)
+	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !isPartner()) || (my_char_slot == u32[A0 + 0x44] && isPartner() && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started)
 	{
 		SpriteHandle spr1 = Renderer.addSpriteHandle(stringformat("lives_icon_%s", CHAR_KEY), px-16, py+8, renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
@@ -294,7 +299,7 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 
 function string getCharacterSelectSpriteKey(u8 character)
 {
-	if (u32[A0 + 0x40 + IS_PARTNER * 4] == my_char_slot && IS_PARTNER == (character == CHARACTER_TAILS))
+	if (u32[A0 + 0x40 + isPartner() * 4] == my_char_slot && isPartner() == (character == CHARACTER_TAILS))
 		return ("charselect_" + CHAR_KEY)
 
 	return base.getCharacterSelectSpriteKey(character)
@@ -304,7 +309,7 @@ function void fn001506()
 {
 	if (D1 == 2 && D2 == 4)
 	{
-		if ((my_char_slot == u32[A3 + 0x40] && !IS_PARTNER) || (my_char_slot == u32[A3 + 0x44] && IS_PARTNER && u32[A3 + 0x40] == 1))
+		if ((my_char_slot == u32[A3 + 0x40] && !isPartner()) || (my_char_slot == u32[A3 + 0x44] && isPartner() && u32[A3 + 0x40] == 1))
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
 			// TODO: I'm not sure this is a good way to do this.
