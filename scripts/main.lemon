@@ -13,10 +13,15 @@ function void UpdateGameObjects()
 	base.UpdateGameObjects()
 }
 
-function string getESChar()
+function string getESChar(u8 player_index)
 {
 	if (is_ES)
-		return UNIQUE_ID
+	{
+		string result = base.getESChar(player_index)
+		return (player_index ^ is_partner) ? result : UNIQUE_ID
+	}
 	else
-		return base.getESChar()
+	{
+		return base.getESChar(player_index)
+	}
 }

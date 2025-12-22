@@ -1,15 +1,15 @@
+///////////////////////////
+///		  SHARED        ///
+///////////////////////////
+
 global u32 my_char_slot
 global u32 max_char_slot
 global u32 max_partner_slot
 global bool is_highest_priority
-
 global bool is_ES
+global bool other_es_mod_selected
 
 define bool is_partner = (CHARACTER_BASE == 2)
-
-///////////////////////////
-///		  SHARED        ///
-///////////////////////////
 
 function void Init()
 {
@@ -90,9 +90,11 @@ function u8 mapESSelectionIndexToVanillaIndex(u32 char_index, u32 partner_index)
 // Helper function
 function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 direction)
 {
+	// Sonic and Sonic+Tails are in reverse order.
 	if (char_index == 0)
 		direction = -direction
-	
+	// General case: increment/decrement the partner_index, and if it goes out of range,
+	// then increment/decrement the char_index.
 	partner_index += direction
 	if (partner_index == max_partner_slot + 1)
 	{
@@ -115,7 +117,7 @@ function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 directio
 		char_index = 1
 		partner_index = 1
 	}
-
+	// Special case: handle the solo Tails slot.
 	if (char_index == 1 && partner_index == 0)
 	{
 		if (direction == 1)
@@ -128,7 +130,7 @@ function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 directio
 			char_index = 0 
 		}	
 	}
-
+	// Special case: skip Knuckles+Partner combinations if the secret is not unlocked.
 	if (char_index == 2 && partner_index > 0 && !Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS))
 	{
 		partner_index = 0
@@ -145,6 +147,7 @@ function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 directio
 			}
 		}
 	}
+	// Return both numbers in a bitpacked u64.
 	return (u64(partner_index) << 32) | u64(char_index)
 }
 
@@ -164,7 +167,7 @@ function void DataSelect.setup()
 
 	u32 buffer_address = getEmptyBuffer(4)
 	// Each save file gets 1 bit which is on/off if it's a file with this extra slot character.
-	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+	System.loadPersistentData(buffer_address, (UNIQUE_ID + "_save_data"), 4)
 	save_slot_data = u32[buffer_address]
 	// Clear shared memory buffer.
 	u32[buffer_address] = 0
@@ -230,7 +233,7 @@ function bool fn00d458()
 		u32 buffer_address = getEmptyBuffer(4)
 		save_slot_data |= 1 << slot_index
 		u32[buffer_address] = save_slot_data
-		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+		System.savePersistentData(buffer_address, (UNIQUE_ID + "_save_data"), 4)
 		// Clear the buffer.
 		u32[buffer_address] = 0
 		// Set this flag to prevent a rendering issue.
@@ -330,7 +333,6 @@ function void fn001506()
 		if ((my_char_slot == u32[A3 + 0x40] && !is_partner) || (my_char_slot == u32[A3 + 0x44] && is_partner && u32[A3 + 0x40] == 1))
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
-			// TODO: I'm not sure this is a good way to do this.
 			return
 		}
 	}
@@ -349,10 +351,10 @@ function void fn00d8c4()
 		// TODO: If the player turns the mod off, then clears a save slot, it will still be marked as a mighty save.
 		u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 		u32 buffer_address = getEmptyBuffer(4)
-		System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+		System.loadPersistentData(buffer_address, (UNIQUE_ID + "_save_data"), 4)
 		u32[buffer_address] &= ~(1 << slot_index)
 		save_slot_data = u32[buffer_address]
-		System.savePersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
+		System.savePersistentData(buffer_address, (UNIQUE_ID + "_save_data"), 4)
 		u32[buffer_address] = 0
 	}
 }
@@ -425,7 +427,6 @@ function u16 ActSelect.TranslateZoneAct(u8 zoneNumber, u8 act)
 // Helper function
 function string getESCharKey(bool partner)
 {
-	// 
 	if (is_partner == partner && my_char_slot == (partner ? act_select_partner_index : act_select_char_index))
 		return capitalizeFirstChar(CHAR_KEY)
 
