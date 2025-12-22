@@ -4,8 +4,12 @@ global u32 max_partner_slot
 global bool is_highest_priority
 
 global bool is_ES
-global u32 save_slot_data
-global bool new_game_started
+
+define bool is_partner = (CHARACTER_BASE == 2)
+
+///////////////////////////
+///		  SHARED        ///
+///////////////////////////
 
 function void Init()
 {
@@ -16,14 +20,7 @@ function void Init()
 		u64[buffer] = 0
 	}
 	is_ES = 0
-	save_slot_data = 0
-	new_game_started = 0
 	base.Init()
-}
-
-function bool isPartner()
-{
-	return (CHARACTER_BASE == 2)
 }
 
 function void count(u32 address)
@@ -34,8 +31,8 @@ function void count(u32 address)
 		u32[address + 4] = 1
 		is_highest_priority = true
 	}
-	u32[address + isPartner() * 4] += 1
-	if (!isPartner())
+	u32[address + is_partner * 4] += 1
+	if (!is_partner)
 		my_char_slot = u32[address]
 	else
 		my_char_slot = u32[address + 4]
@@ -45,9 +42,6 @@ function void count(u32 address)
 	max_char_slot = u32[address]	
 	max_partner_slot = u32[address + 4]
 }
-
-// TODO: Need to make the entire act select work.
-// NOTE: 0xffffe6ac is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
 
 // Helper function
 function u32 getEmptyBuffer(u32 bytes)
@@ -70,8 +64,104 @@ function u32 getEmptyBuffer(u32 bytes)
 	return buffer_address
 }
 
+function string getCharacterSelectSpriteKey(u8 character)
+{
+	if (u32[A0 + 0x40 + is_partner * 4] == my_char_slot && is_partner == (character == CHARACTER_TAILS))
+		return ("charselect_" + CHAR_KEY)
+
+	return base.getCharacterSelectSpriteKey(character)
+}
+
+// Helper function
+function u8 mapESSelectionIndexToVanillaIndex(u32 char_index, u32 partner_index)
+{
+	u8 result = 0
+	if (char_index == 0)
+		result = (partner_index == 0) ? 1 : 0
+	else if (char_index == 1)
+		result = 2
+	else if (char_index >= 2 && partner_index == 0)
+		result = 3
+	else
+		result = 4
+	return result
+}
+
+// Helper function
+function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 direction)
+{
+	if (char_index == 0)
+		direction = -direction
+	
+	partner_index += direction
+	if (partner_index == max_partner_slot + 1)
+	{
+		partner_index = 0
+		char_index += 1
+	}
+	else if (partner_index == ~0)
+	{
+		partner_index = max_partner_slot
+		char_index -= 1
+	}
+
+	if (char_index == max_char_slot + 1)
+	{
+		char_index = 0
+		partner_index = max_partner_slot
+	}
+	else if (char_index == ~0)
+	{
+		char_index = 1
+		partner_index = 1
+	}
+
+	if (char_index == 1 && partner_index == 0)
+	{
+		if (direction == 1)
+		{
+			char_index = max_char_slot
+			partner_index = max_partner_slot
+		}
+		else
+		{
+			char_index = 0 
+		}	
+	}
+
+	if (char_index == 2 && partner_index > 0 && !Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS))
+	{
+		partner_index = 0
+		if (direction == 1)
+		{
+			if (max_char_slot > 2)
+			{
+				char_index = 3
+			}
+			else
+			{
+				char_index = 0
+				partner_index = max_partner_slot
+			}
+		}
+	}
+	return (u64(partner_index) << 32) | u64(char_index)
+}
+
+///////////////////////////
+///     DATA SELECT     ///
+///////////////////////////
+
+global u32 save_slot_data
+global bool new_game_started
+
+// NOTE: 0xffffe6ac is the start of the memory where the normal save data gets loaded. Each save slot is 10 bytes.
+
 function void DataSelect.setup()
 {
+	save_slot_data = 0
+	new_game_started = 0
+
 	u32 buffer_address = getEmptyBuffer(4)
 	// Each save file gets 1 bit which is on/off if it's a file with this extra slot character.
 	System.loadPersistentData(buffer_address, (CHAR_KEY + "_save_data"), 4)
@@ -89,9 +179,8 @@ function void fn00d39e()
 	// If this slot is a mighty file...
 	if (save_slot_data & (1 << objA0.flags2e))
 	{
-		debugLog(CHAR_KEY)
 		// Initialize the save slot object with the correct extra slot values.
-		if (!isPartner())
+		if (!is_partner)
 			u32[A0 + 0x40] = my_char_slot
 		else
 			u32[A0 + 0x44] = my_char_slot
@@ -118,7 +207,7 @@ function void fn00d42c()
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	base.fn00d42c()
 	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == u32[A0 + 0x40]) && !isPartner())
+	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == u32[A0 + 0x40]) && !is_partner)
 	{
 		if (CHARACTER_BASE == 1)
 			levelselect.characters = 4 - levelselect.characters
@@ -135,7 +224,7 @@ function bool fn00d458()
 	u8 result = base.fn00d458()
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + isPartner() * 4]) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + is_partner * 4]) && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// Mark that this file is an ES character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(4)
@@ -179,90 +268,27 @@ function void fn00d6d0()
 	D0.u16 = 1
 	base.fn00d6d0()
 	// Diff will be -1, 0, or 1, indicating if the slot moved down, stayed still, or moved up.
-	s16 diff = D0.u16 - 1
-	if (diff == 0)
+	s16 direction = D0.u16 - 1
+	if (direction == 0)
 	{
 		D0.u16 = d0_temp
 		return
 	}
-	u32 char_index = u32[A0 + 0x40]
-	u32 partner_index = u32[A0 + 0x44]
 
-	if (char_index == 0)
-		diff = -diff
-	
-	partner_index += diff
-	if (partner_index == max_partner_slot + 1)
-	{
-		partner_index = 0
-		char_index += 1
-	}
-	else if (partner_index == ~0)
-	{
-		partner_index = max_partner_slot
-		char_index -= 1
-	}
-
-	if (char_index == max_char_slot + 1)
-	{
-		char_index = 0
-		partner_index = max_partner_slot
-	}
-	else if (char_index == ~0)
-	{
-		char_index = 1
-		partner_index = 1
-	}
-
-	if (char_index == 1 && partner_index == 0)
-	{
-		if (diff == 1)
-		{
-			char_index = max_char_slot
-			partner_index = max_partner_slot
-		}
-		else
-		{
-			char_index = 0 
-		}	
-	}
-
-	if (char_index == 2 && partner_index > 0 && !Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS))
-	{
-		partner_index = 0
-		if (diff == 1)
-		{
-			if (max_char_slot > 2)
-			{
-				char_index = 3
-			}
-			else
-			{
-				char_index = 0
-				partner_index = max_partner_slot
-			}
-		}
-	}
+	u64 selection_index.packed = getESSelectionIndex(u32[A0 + 0x40], u32[A0 + 0x44], direction)
 
 	// Store these values in the data select object so we can reference it during rendering.
 	// These bytes are unused, so it should be fine. I'd rather do this with an array, but we don't have those.
-	u32[A0 + 0x40] = char_index
-	u32[A0 + 0x44] = partner_index
-
+	u32[A0 + 0x40] = u32(selection_index.packed & 0xffff)
+	u32[A0 + 0x44] = u32(selection_index.packed >> 32)
+	
 	// Map the custom char values to the correct values of D0.u16
-	if (char_index == 0)
-		D0.u16 = (partner_index == 0) ? 1 : 0
-	else if (char_index == 1)
-		D0.u16 = 2
-	else if (char_index >= 2 && partner_index == 0)
-		D0.u16 = 3
-	else
-		D0.u16 = 4
+	D0.u16 = mapESSelectionIndexToVanillaIndex(u32[A0 + 0x40], u32[A0 + 0x44])
 }
 
 function u8 getSelectedESCharBase()
 {
-	if (my_char_slot == u32[A0 + 0x40 + isPartner() * 4])
+	if (my_char_slot == u32[A0 + 0x40 + is_partner * 4])
 	{
 		return CHARACTER_BASE
 	}
@@ -287,7 +313,7 @@ function void fn00d30c()
 
 function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 {
-	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !isPartner()) || (my_char_slot == u32[A0 + 0x44] && isPartner() && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started)
+	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !is_partner) || (my_char_slot == u32[A0 + 0x44] && is_partner && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started)
 	{
 		SpriteHandle spr1 = Renderer.addSpriteHandle(stringformat("lives_icon_%s", CHAR_KEY), px-16, py+8, renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
@@ -297,19 +323,11 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
 }
 
-function string getCharacterSelectSpriteKey(u8 character)
-{
-	if (u32[A0 + 0x40 + isPartner() * 4] == my_char_slot && isPartner() == (character == CHARACTER_TAILS))
-		return ("charselect_" + CHAR_KEY)
-
-	return base.getCharacterSelectSpriteKey(character)
-}
-
 function void fn001506()
 {
 	if (D1 == 2 && D2 == 4)
 	{
-		if ((my_char_slot == u32[A3 + 0x40] && !isPartner()) || (my_char_slot == u32[A3 + 0x44] && isPartner() && u32[A3 + 0x40] == 1))
+		if ((my_char_slot == u32[A3 + 0x40] && !is_partner) || (my_char_slot == u32[A3 + 0x44] && is_partner && u32[A3 + 0x40] == 1))
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
 			// TODO: I'm not sure this is a good way to do this.
@@ -339,9 +357,9 @@ function void fn00d8c4()
 	}
 }
 
-///////////////////////////////
-///		 DOCUMENTATION		///
-///////////////////////////////
+///////////////////////////
+///    DOCUMENTATION    ///
+///////////////////////////
 
 function void DataSelect.update()
 {
@@ -364,3 +382,198 @@ function void fn00d1fa()
 	fn00d458() - Checks for UP+DOWN inputs to change zones.
 	fn00d6d0() - Checks for UP+DOWN inputs to change characters.
 */
+
+///////////////////////////
+///		 ACT SELECT		///
+///////////////////////////
+
+global u32 act_select_char_index
+global u32 act_select_partner_index
+
+// You'd think that the Act Select would be easier to work with than the Data select.
+// You'd be wrong.
+
+function void ActSelect.Menu(u8 fadeInMethod)
+{
+	// This is the "entry" function of Act Select. It runs in an infinite loop until
+	// the player exits or starts a game. As such we can't do much with this function.
+	// But we do need to initialize the custom selection index to Sonic+Tails.
+	act_select_char_index = 0
+	act_select_partner_index = 1
+	base.ActSelect.Menu(fadeInMethod)
+}
+
+function u16 ActSelect.TranslateZoneAct(u8 zoneNumber, u8 act)
+{
+	// This function is run just before exiting the act select and starting a game,
+	// so it's a good place to do cleanup.
+
+	// Set the correct character value for levelselect.characters and mark ES characters active.
+	if (is_highest_priority)
+		levelselect.characters = mapESSelectionIndexToVanillaIndex(act_select_char_index, act_select_partner_index)
+
+	if (my_char_slot == (is_partner ? act_select_partner_index : act_select_char_index))
+	{
+		is_ES = true
+		if (CHARACTER_BASE == 1)
+			levelselect.characters = 4 - levelselect.characters
+	}
+	
+	return base.ActSelect.TranslateZoneAct(zoneNumber, act)
+}
+
+// Helper function
+function string getESCharKey(bool partner)
+{
+	// 
+	if (is_partner == partner && my_char_slot == (partner ? act_select_partner_index : act_select_char_index))
+		return capitalizeFirstChar(CHAR_KEY)
+
+	return base.getESCharKey(partner)
+}
+
+function string ActSelect.GetCharacterCombinationName(u8 index)
+{
+	// This function is used to get the name string of the selected character.
+	// We have to override it to allow any non-Tails character to be paired
+	// with any Tails character.
+	string key = ""
+	if (act_select_char_index == 0)
+		key = "Sonic"
+	else if (act_select_char_index == 2)
+		key = "Knuckles"
+	else if (act_select_char_index >= 3)
+		key = getESCharKey(false)
+	
+	if (act_select_char_index != 1 && act_select_partner_index >= 1)
+		key += " & "
+	
+	if (act_select_partner_index == 1)
+		key += "Tails"
+	else if (act_select_partner_index >= 2)
+		key += getESCharKey(true)
+
+	return key
+}
+
+function string ActSelect.GetCharacterCombinationSprite(u8 index)
+{
+	// We have to override drawing the character sprites and do it ourselves.
+	return "act_select_character_sprite_override"
+}
+
+function string capitalizeFirstChar(string str)
+{
+	// This function capitalizes the first character of the input strings.
+	// If you don't know how Ascii works, this won't make any sense.
+	u8 A = 0x41
+	u8 Z = 0x5a
+	u8 a = 0x61
+	u8 z = 0x7a
+	u8 first_char = getchar(str, 0)
+
+	// Do nothing if the first character is not a letter.
+	if (first_char < A || first_char > z || (first_char > Z && first_char < a))
+		return str
+	// Do nothing if the first character is already upper case.
+	if (first_char <= Z)
+		return str
+
+	first_char -= (a - A)
+	string result = getStringFromCharacter(first_char)
+	result += substring(str, 1, str.length() - 1)
+	return (result)
+}
+
+function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedAct, s16 anchorX)
+{
+	base.ActSelect.DrawMenu(selectedEntry, selectedZone, selectedAct, anchorX)
+	// There isn't a good place to manage the selection index, but this function is good enough I suppose.
+	
+	u8 max_vanilla_characters = Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3
+	if (is_highest_priority)
+	{
+		// Take control of the levelselect.characters value so that we can display/hide the "<" and ">" symbols
+		// correctly, and prevent other ES mods from interfering with us.
+		if (act_select_char_index == 0 && act_select_partner_index == max_partner_slot)
+			levelselect.characters = 0
+		else if (act_select_char_index == max_char_slot && act_select_partner_index == max_partner_slot)
+			levelselect.characters = max_vanilla_characters
+		else
+			levelselect.characters = 2
+	}
+	// Don't change the selection index unless the character field is selected.
+	if (selectedEntry != 2)
+		return
+
+	s16 direction = 0
+	if (Input.buttonPressed(BUTTON_LEFT) && levelselect.characters != 0)
+		direction = -1
+	else if (Input.buttonPressed(BUTTON_RIGHT) && levelselect.characters != max_vanilla_characters)
+		direction = 1
+	
+	if (direction == 0)
+		return
+	
+	u64 selection_index.packed = getESSelectionIndex(act_select_char_index, act_select_partner_index, direction)
+	act_select_char_index = u32(selection_index.packed & 0xffff)
+	act_select_partner_index = u32(selection_index.packed >> 32)
+}
+
+function void Renderer.drawSprite(u64 key, s16 px, s16 py, u16 atex, u8 flags, u16 renderQueue)
+{
+	// I hate that I have to hook this function, but unfortunately the Act Select just doesn't give me any good options.
+
+	if (key != "act_select_character_sprite_override" || !is_highest_priority)
+	{
+		base.Renderer.drawSprite(key, px, py, atex, flags, renderQueue)
+		return
+	}
+
+	// In the Act Select, Sonic+Tails and Knuckles+Tails are drawn as a single sprite, not as separate sprites like
+	// they should be. If they were separate, we could just replace the first character with the correct ES sprite
+	// and then replace the Tails sprite with the correct ES sprite. But they're not separate, so in order to
+	// acommodate all possible combinations, we have to just re-draw the entire thing ourselves.
+
+	// Need a buffer and A0 because of how the hook to getCharacterSelectSpriteKey() is set up.
+	// I could make a separate function that doesn't need those, but this way works.
+	u32 buffer = getEmptyBuffer(8)
+	u32 a0_temp = A0
+	A0 = buffer - 0x40
+	u32[buffer] = act_select_char_index
+	u32[buffer + 4] = act_select_partner_index
+
+	// The unmodded sprite keys are "menu_characters_*"
+
+	string char1 = ""
+	if (act_select_char_index == 0)
+		char1 = "menu_characters_sonic"
+	else if (act_select_char_index == 2)
+		char1 = "menu_characters_knuckles"
+	else if (act_select_char_index >= 3)
+		char1 = getCharacterSelectSpriteKey(CHARACTER_KNUCKLES)
+
+	string char2 = (act_select_partner_index <= 1) ? "menu_characters_tails" : getCharacterSelectSpriteKey(CHARACTER_TAILS)
+
+	bool is_alone = act_select_char_index == 1 || act_select_partner_index == 0
+	u8 x_offset = is_alone ? 0 : 8
+	u8 flip = is_alone ? 0 : SPRITE_FLAG_FLIP_X
+
+	if (act_select_partner_index != 0)
+	{
+		base.Renderer.drawSprite(char2, px + x_offset, py, 0, flip, renderQueue)
+		renderQueue += 1
+	}
+
+	if (act_select_char_index != 1)
+	{
+		// Sonic always faces the same way regardless of if he has a partner.
+		if (act_select_char_index == 0)
+			flip = 0
+
+		base.Renderer.drawSprite(char1, px - x_offset, py, 0, flip, renderQueue)
+	}
+
+	A0 = a0_temp
+	u64[buffer] = 0
+}
