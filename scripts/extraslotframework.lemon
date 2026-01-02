@@ -2,15 +2,15 @@
 ///		  SHARED        ///
 ///////////////////////////
 
-global u32 my_char_slot
-global u32 max_char_slot
-global u32 max_partner_slot
+global u16 my_char_slot
+global u16 max_char_slot
+global u16 max_partner_slot
 global bool is_highest_priority
 global bool is_ES
 
-define u32 extra_char_index = u32[A0 + 0x40]
-define u32 extra_partner_index = u32[A0 + 0x44]
-define u8 other_mod_selected = u8[A0 + 0x48]
+define u16 extra_char_index = u16[A0 + 0x40]
+define u16 extra_partner_index = u16[A0 + 0x42]
+define u8 other_mod_selected = u8[A0 + 0x44]
 
 define bool is_partner = (CHARACTER_BASE == 1)
 
@@ -18,9 +18,9 @@ function void Init()
 {
 	if (my_char_slot == 0)
 	{
-		u32 buffer = getEmptyBuffer(8)
+		u32 buffer = getEmptyBuffer(4)
 		count(buffer)
-		u64[buffer] = 0
+		u32[buffer] = 0
 	}
 	is_ES = 0
 	base.Init()
@@ -28,22 +28,22 @@ function void Init()
 
 function void count(u32 address)
 {
-	if (u64[address] == 0)
+	if (u32[address] == 0)
 	{
-		u32[address] = 2
-		u32[address + 4] = 1
+		u16[address] = 2
+		u16[address + 2] = 1
 		is_highest_priority = true
 	}
-	u32[address + is_partner * 4] += 1
+	u16[address + is_partner * 2] += 1
 	if (!is_partner)
-		my_char_slot = u32[address]
+		my_char_slot = u16[address]
 	else
-		my_char_slot = u32[address + 4]
+		my_char_slot = u16[address + 2]
 	
 	base.count(address)
 
-	max_char_slot = u32[address]	
-	max_partner_slot = u32[address + 4]
+	max_char_slot = u16[address]	
+	max_partner_slot = u16[address + 2]
 }
 
 // Helper function
@@ -69,14 +69,14 @@ function u32 getEmptyBuffer(u32 bytes)
 
 function string getCharacterSelectSpriteKey(u8 character)
 {
-	if (u32[A0 + 0x40 + is_partner * 4] == my_char_slot && is_partner == (character == CHARACTER_TAILS) && !other_mod_selected)
+	if (u16[A0 + 0x40 + is_partner * 2] == my_char_slot && is_partner == (character == CHARACTER_TAILS) && !other_mod_selected)
 		return ("charselect_" + CHAR_KEY)
 
 	return base.getCharacterSelectSpriteKey(character)
 }
 
 // Helper function
-function u8 mapESSelectionIndexToVanillaIndex(u32 char_index, u32 partner_index)
+function u8 mapESSelectionToVanilla(u16 char_index, u16 partner_index)
 {
 	u8 result = 0
 	if (char_index == 0)
@@ -91,7 +91,7 @@ function u8 mapESSelectionIndexToVanillaIndex(u32 char_index, u32 partner_index)
 }
 
 // Helper function
-function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 direction)
+function u32 getESSelectionIndex(u16 char_index, u16 partner_index, s16 direction)
 {
 	// Sonic and Sonic+Tails are in reverse order.
 	if (char_index == 0)
@@ -150,8 +150,8 @@ function u64 getESSelectionIndex(u32 char_index, u32 partner_index, s16 directio
 			}
 		}
 	}
-	// Return both numbers in a bitpacked u64.
-	return (u64(partner_index) << 32) | u64(char_index)
+	// Return both numbers in a bitpacked u32.
+	return (u32(partner_index) << 16) | u32(char_index)
 }
 
 ///////////////////////////
@@ -230,7 +230,7 @@ function bool fn00d458()
 	u8 result = base.fn00d458()
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && (my_char_slot == u32[A0 + 0x40 + is_partner * 4]) && !other_mod_selected && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (my_char_slot == u16[A0 + 0x40 + is_partner * 2]) && !other_mod_selected && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// Mark that this file is an ES character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(4)
@@ -310,24 +310,22 @@ function void fn00d6d0()
 		other_mod_selected = 1
 		return
 	}
-
+	
 	if (other_mod_selected)
 		return
-
-	u64 selection_index.packed = getESSelectionIndex(extra_char_index, extra_partner_index, direction)
+	u32 selection_index.packed = getESSelectionIndex(extra_char_index, extra_partner_index, direction)
 
 	// Store these values in the data select object so we can reference it during rendering.
 	// These bytes are unused, so it should be fine. I'd rather do this with an array, but we don't have those.
-	extra_char_index = u32(selection_index.packed & 0xffff)
-	extra_partner_index = u32(selection_index.packed >> 32)
-	
+	extra_char_index = u16(selection_index.packed & 0xffff)
+	extra_partner_index = u16(selection_index.packed >> 16)
 	// Map the custom char values to the correct values of D0.u16
-	D0.u16 = mapESSelectionIndexToVanillaIndex(extra_char_index, extra_partner_index)
+	D0.u16 = mapESSelectionToVanilla(extra_char_index, extra_partner_index)
 }
 
 function u8 getSelectedESCharBase()
 {
-	if (my_char_slot == u32[A0 + 0x40 + is_partner * 4])
+	if (my_char_slot == u16[A0 + 0x40 + is_partner * 2])
 		return CHARACTER_BASE
 
 	return base.getSelectedESCharBase()
@@ -353,7 +351,7 @@ function void fn001506()
 {
 	if (D1 == 2 && D2 == 4)
 	{
-		if ((my_char_slot == u32[A3 + 0x40] && !is_partner) || (my_char_slot == u32[A3 + 0x44] && is_partner && u32[A3 + 0x40] == 1) && !other_mod_selected)
+		if ((my_char_slot == u16[A3 + 0x40] && !is_partner) || (my_char_slot == u16[A3 + 0x42] && is_partner && u16[A3 + 0x40] == 1) && !other_mod_selected)
 		{
 			// Prevent the life and continue icons from being drawn on this save slot object.
 			return
@@ -387,8 +385,8 @@ function void fn00d8c4()
 ///////////////////////////
 
 global bool act_select_other_mod_selected
-global u32 act_select_char_index
-global u32 act_select_partner_index
+global u16 act_select_char_index
+global u16 act_select_partner_index
 
 // You'd think that the Act Select would be easier to work with than the Data select.
 // You'd be wrong.
@@ -411,7 +409,7 @@ function u16 ActSelect.TranslateZoneAct(u8 zoneNumber, u8 act)
 
 	// Set the correct character value for levelselect.characters and mark ES characters active.
 	if (is_highest_priority)
-		levelselect.characters = mapESSelectionIndexToVanillaIndex(act_select_char_index, act_select_partner_index)
+		levelselect.characters = mapESSelectionToVanilla(act_select_char_index, act_select_partner_index)
 
 	if (my_char_slot == (is_partner ? act_select_partner_index : act_select_char_index))
 	{
@@ -532,55 +530,55 @@ function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedA
 	
 	if (!skip)
 	{
-		u64 selection_index.packed = getESSelectionIndex(act_select_char_index, act_select_partner_index, direction)
-		act_select_char_index = u32(selection_index.packed & 0xffff)
-		act_select_partner_index = u32(selection_index.packed >> 32)
+		u32 selection_index.packed = getESSelectionIndex(act_select_char_index, act_select_partner_index, direction)
+		act_select_char_index = u16(selection_index.packed & 0xffff)
+		act_select_partner_index = u16(selection_index.packed >> 16)
 	}
 
 	base.ActSelect.DrawMenu(selectedEntry, selectedZone, selectedAct, anchorX)
 
-	if (act_select_other_mod_selected)
+	if (act_select_other_mod_selected || !is_highest_priority)
 		return
+
 	// Draw the character sprites
+	// The buffer and A0 are not strictly necessary, but they're being used due to how
+	// getCharacterSelectSpriteKey() is set up.
+	u32 buffer = getEmptyBuffer(4)
+	u32 a0_temp = A0
+	A0 = buffer - 0x40
+	u16[buffer] = act_select_char_index
+	u16[buffer + 2] = act_select_partner_index
+
+	// The unmodded sprite keys are "menu_characters_*"
+	s16 px = max(anchorX - 125, 52)
+	s16 py = 156
+	string char1 = ""
+	if (act_select_char_index == 0)
+		char1 = "menu_characters_sonic"
+	else if (act_select_char_index == 2)
+		char1 = "menu_characters_knuckles"
+	else if (act_select_char_index >= 3)
+		char1 = getCharacterSelectSpriteKey(CHARACTER_KNUCKLES)
+
+	string char2 = (act_select_partner_index <= 1) ? "menu_characters_tails" : getCharacterSelectSpriteKey(CHARACTER_TAILS)
+
+	bool is_alone = act_select_char_index == 1 || act_select_partner_index == 0
+	s8 x_offset = is_alone ? 0 : 8
+	s8 y_offset = (char2 == "menu_characters_tails") ? -2 : 0
+	u8 flip = is_alone ? 0 : SPRITE_FLAG_FLIP_X
+
+	if (act_select_partner_index != 0)
+		Renderer.drawSprite(char2, px + x_offset, py + y_offset, 0, flip, 0xf004)
+
+	if (act_select_char_index != 1)
 	{
-		u32 buffer = getEmptyBuffer(8)
-		u32 a0_temp = A0
-		A0 = buffer - 0x40
-		u32[buffer] = act_select_char_index
-		u32[buffer + 4] = act_select_partner_index
-
-		// The unmodded sprite keys are "menu_characters_*"
-		s16 px = max(anchorX - 125, 52)
-		s16 py = 156
-		string char1 = ""
+		// Sonic always faces the same way regardless of if he has a partner.
 		if (act_select_char_index == 0)
-			char1 = "menu_characters_sonic"
-		else if (act_select_char_index == 2)
-			char1 = "menu_characters_knuckles"
-		else if (act_select_char_index >= 3)
-			char1 = getCharacterSelectSpriteKey(CHARACTER_KNUCKLES)
+			flip = 0
 
-		string char2 = (act_select_partner_index <= 1) ? "menu_characters_tails" : getCharacterSelectSpriteKey(CHARACTER_TAILS)
-
-		bool is_alone = act_select_char_index == 1 || act_select_partner_index == 0
-		s8 x_offset = is_alone ? 0 : 8
-		s8 y_offset = (char2 == "menu_characters_tails") ? -2 : 0
-		u8 flip = is_alone ? 0 : SPRITE_FLAG_FLIP_X
-
-		if (act_select_partner_index != 0)
-			Renderer.drawSprite(char2, px + x_offset, py + y_offset, 0, flip, 0xf004)
-
-		if (act_select_char_index != 1)
-		{
-			// Sonic always faces the same way regardless of if he has a partner.
-			if (act_select_char_index == 0)
-				flip = 0
-
-			Renderer.drawSprite(char1, px - x_offset, py, 0, flip, 0xf005)
-		}
-
-		A0 = a0_temp
-		u64[buffer] = 0
+		Renderer.drawSprite(char1, px - x_offset, py, 0, flip, 0xf005)
 	}
-	
+
+	A0 = a0_temp
+	u32[buffer] = 0
 }
