@@ -648,14 +648,12 @@ function void Spikes.Update()
 {
     // Floor spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
-    {
         block_spikes = 1
-    }
+
     base.Spikes.Update()
+
     if (block_spikes == 1)
-    {
         block_spikes = 0
-    }
 }
 
 //# address-hook(0x0240e2) end(0x024138)
@@ -663,14 +661,12 @@ function void fn0240e2()
 {
     // Wall spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
-    {
         block_spikes = 1
-    }
+
     base.fn0240e2()
+
     if (block_spikes == 1)
-    {
         block_spikes = 0
-    }
 }
 
 //# address-hook(0x02413e) end(0x024188)
@@ -678,14 +674,12 @@ function void fn02413e()
 {
     // Ceiling spikes.
     if (hammer_drop_state || (bouncy_ball_state >= 2))
-    {
         block_spikes = 1
-    }
+
     base.fn02413e()
+    
     if (block_spikes == 1)
-    {
         block_spikes = 0
-    }
 }
 
 // Also, in some zones, damaging blocker elements look like spikes, even though they're not. In HCZ, there's a

@@ -1,33 +1,30 @@
 function string getCharacterPaletteKey(u8 character)
 {
-	if (is_ES && character == CHARACTER_KNUCKLES)
-	{
+	if (is_ES && character == CHARACTER_BASE)
 		return "mighty_palette"
-	}
+
 	return base.getCharacterPaletteKey(character)
 }
 
 function string getCharacterBluesphereSpriteKey(u8 character)
 {
 	if (is_ES && character == CHARACTER_KNUCKLES)
-	{
 		return "bluesphere_mighty"
-	}
+
 	return base.getCharacterBluesphereSpriteKey(character)
 }
 
 function string getCharacterBluespherePaletteKey(u8 character)
 {
-	if (is_ES && character == CHARACTER_KNUCKLES)
-	{
+	if (is_ES && character == CHARACTER_BASE)
 		return "mightyBS_palette"
-	}
+
 	return base.getCharacterBluespherePaletteKey(character)
 }
 
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
-	if (objA0.update_address == 0x016444 && is_ES)
+	if (is_ES && character == CHARACTER_BASE)
 	{
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
@@ -53,7 +50,7 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 				str += "0x00"
 			else if (hammer_drop_state <= 4)
 				str += "0x01"
-			else if (hammer_drop_state)
+			else
 				str += (stringformat("0x%02x", ((((hammer_drop_state - 4) % 12) / 3) + 2)))
             return str
 		}
@@ -98,6 +95,15 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		spr.setFlipX(objA0.render_flags & render_flag.FLIP_X)
 		spr.setPriorityFlag(objA0.sprite_attributes & sprite_attribute.PRIORITY)
 		return true
+	}
+	// Lives and continue icons in the data select screen.
+	// Don't modify this condition.
+	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !is_partner) || (my_char_slot == u32[A0 + 0x44] && is_partner && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started && !u8[A0 + 0x48])
+	{
+		SpriteHandle spr1 = Renderer.addSpriteHandle("lives_icon_mighty", px-16, py+8, renderQueue)
+		SpriteHandle spr2 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px-16, py+26, renderQueue)
+		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
+		HUD.drawSprite("hud_char_colon", px, py+32, renderQueue)
 	}
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
 }

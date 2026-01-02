@@ -3,10 +3,9 @@ include extraslotframework
 include rendercharacter
 include mightyabilities
 
-constant string UNIQUE_ID = "soren lily mighty"
-
+constant string UNIQUE_ID = "soren_lily_mighty"
 constant string CHAR_KEY = "mighty"
-constant u8 CHARACTER_BASE = 3
+constant u8 CHARACTER_BASE = 2
 
 function void UpdateGameObjects()
 {
