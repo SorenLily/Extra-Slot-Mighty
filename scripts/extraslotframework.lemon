@@ -462,7 +462,7 @@ function string ActSelect.GetCharacterCombinationSprite(u8 index)
 	if (act_select_other_mod_selected)
 		return base.ActSelect.GetCharacterCombinationSprite(index)
 	// We have to override drawing the character sprites and do it ourselves.
-	return ""
+	return "act_select_character_sprite_override"
 }
 
 function string capitalizeFirstChar(string str)
