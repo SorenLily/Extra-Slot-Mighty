@@ -6,8 +6,8 @@ global s8 hammer_drop_direction
 global u8 hammer_drop_rebound
 // 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
 global u8 bouncy_ball_state
-// 0 -> off, 1 -> clinging to left wall, 2 -> clinging to right wall.
-global u8 wall_cling
+// 0 -> off, -1 -> clinging to left wall, 1 -> clinging to right wall.
+global s8 wall_cling
 // Timer that allows clinging to walls.
 global u8 cling_timer
 // State for blocking damage from spike collisions.
@@ -19,8 +19,6 @@ global s8 store_bounce
 // Copies of velocity used for bouncing.
 global s16 velocity.x.copy
 global s16 velocity.y.copy
-// Flag that prevents bouncing when the game is waiting to start the character's win pose.
-global u8 waiting_for_win_pose
 // Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
@@ -28,6 +26,9 @@ global u8 mighty_wp_timer
 global bool supress_sfx
 // Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
+
+constant u8 BOUNCY_BALL_MAX = 5
+constant u8 BOUNCY_BALL_WINDUP = 20
 
 // Helper function
 function bool isMighty()
@@ -88,7 +89,6 @@ function void Character.Initialization.shared(u8 character)
     velocity.y.copy = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
-    waiting_for_win_pose = 0
     base.Character.Initialization.shared(character)
 }
 
@@ -113,6 +113,8 @@ function void Character.BaseUpdate.Knuckles()
         char.character = CHARACTER_KNUCKLES
         global.characters = CHARS_KNUCKLES_ALONE
     }
+    debugLog(stringformat("Bouncy Ball State: %x", bouncy_ball_state))
+    debugLog(stringformat("Hammer Drop State: %x", hammer_drop_state))
     return
 }
 
@@ -231,7 +233,7 @@ function void Character.updateJumpMoves()
     if (!wall_cling && cling_timer)
     {
         // Increment the timer, but wrap back to 0 eventually.
-        cling_timer++
+        cling_timer += 1
         cling_timer &= 0x1f
     }
     
@@ -253,7 +255,7 @@ function void Character.updateJumpMoves()
         }
     }
     // If in bouncy ball state and no longer holding jump...
-    if (bouncy_ball_state && !(control.pad1.state & CONTROL_ABC))
+    if ((bouncy_ball_state == 1) && !(control.pad1.state & CONTROL_ABC))
     {
         // End bouncy ball state.
         bouncy_ball_state = 0
@@ -285,7 +287,7 @@ function void SonicPressedJumpInMidAir()
     if (control.pad1.state & CONTROL_DOWN)
     {
         // End the bouncy ball state.
-        bouncy_ball_state = 0
+        // bouncy_ball_state = 0
         // Start the hammer drop.
         if (!hammer_drop_rebound)
             hammer_drop_state = 1
@@ -304,9 +306,8 @@ function void Character.UpdateControlInAir()
 {
     base.Character.UpdateControlInAir()
     if (!isMighty())
-    {
         return
-    }
+    
     // If we have bounced at least once during bouncy ball state...
     if (bouncy_ball_state >= 3)
     {
@@ -331,7 +332,7 @@ function void Character.UpdateControlInAir()
 
         if (control.player1.state & CONTROL_UP)
         {
-            char.velocity.y -= dv
+            char.velocity.y -= (char.velocity.y < 0) ? (dv + dv >> 2) : dv
         }
         else if (control.player1.state & CONTROL_DOWN)
         {
@@ -368,21 +369,23 @@ function void Character.LandingOnGroundResetState()
     // See the hook to updateGameObjectLoop() for more information.
     
     // If we are in a bouncing state...
-    if (hammer_drop_state || bouncy_ball_state >= 2)
+    if (hammer_drop_state || (bouncy_ball_state >= 2 && control.player1.state & CONTROL_ABC))
     {
-        if (!waiting_for_win_pose)
-        {
-            // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
-            if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
-                store_bounce = 1
-            // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
-            velocity.x.copy = mainchar.groundhit.velocity.x
-            velocity.y.copy = mainchar.groundhit.velocity.y
-            playSound(hammer_drop_state ? 0x5f : 0x49)
-        }
+        // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
+        if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
+            store_bounce = 1
+        // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
+        velocity.x.copy = mainchar.groundhit.velocity.x
+        velocity.y.copy = mainchar.groundhit.velocity.y
+        playSound(hammer_drop_state ? 0x5f : 0x49)
+
         // Reset wall cling values.
         wall_cling = 0
         cling_timer = 0
+    }
+    else if (bouncy_ball_state >= 2 && !(control.player1.state & CONTROL_ABC) && !hammer_drop_state)
+    {
+        bouncy_ball_state = 0
     }
 }
 
@@ -404,7 +407,7 @@ function void mightyBounce()
     u8 reflected_angle = 0
     u8 slide = 0
     // For shallow enough angles...
-    if (char.rotation <= 0x28 || char.rotation >= 0xd0)
+    if (true)//(char.rotation <= 0x28 || char.rotation >= 0xd0)
     {
         // Reflect off of them
         reflected_angle = ground_angle * 2 - move_angle
@@ -422,14 +425,17 @@ function void mightyBounce()
     if (bouncy_ball_state >= 2)
     {
         // Increment bouncy_ball_state every time it bounces.
-        bouncy_ball_state = min(bouncy_ball_state + 1, 12)
+        bouncy_ball_state = min(bouncy_ball_state + 1, BOUNCY_BALL_MAX)
     }
     // Now we'll actually calculate the velocity.
     s16 force = 0
     if (hammer_drop_state)
     {
         // The formula is simple for the hammer drop state.
-        force = min(0xb00, 0x600 + hammer_drop_state * 0x30)
+        force = 0x600 + (max(hammer_drop_state, 8) - 8) * 0x30
+        force += (max(bouncy_ball_state, 2) - 2) * 0x100
+        force = min(0xa00, force)
+        bouncy_ball_state = 0
     }
     else if (bouncy_ball_state >= 2)
     {
@@ -439,7 +445,6 @@ function void mightyBounce()
         force += 0x80 * (bouncy_ball_state)
         force = clamp(force, 0x600, 0xc00)
     }
-
     if (hammer_drop_state || slide)
     {
         if (slide)
@@ -459,7 +464,7 @@ function void mightyBounce()
         char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
         // Set the x-velocity more directly so that it can go faster without affecting y-velocity.
         // TODO: this probably needs to be modified and take the force value into account.
-        char.velocity.x = 0x480 + 0xc0 * (bouncy_ball_state - 2)
+        char.velocity.x = 0x480 + 0x140 * (bouncy_ball_state - 2)
         char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
         // If pressing left/right in the opposite direction of the bounce...
         if ((char.velocity.x > 0 && (control.player1.state & CONTROL_LEFT)) || (char.velocity.x < 0 && (control.player1.state & CONTROL_RIGHT)))
@@ -473,10 +478,14 @@ function void mightyBounce()
     // Underwater movement penalty.
     if (char.flags & char.flag.UNDERWATER)
     {
+        char.velocity.x >>= 1
+        char.velocity.y >>= 1
+        /*
         char.velocity.x >>= 3
         char.velocity.x *= 5
         char.velocity.y >>= 3
         char.velocity.y *= 5
+        */
     }
 
     //debugLog(char.velocity.x)
@@ -542,9 +551,7 @@ function void Character.CheckCollision()
     // If we are allowed to cling to walls and we are in the NORMAL state and knuckles would be allowed to cling to walls...
     if (cling_timer && char.base_state == base_state.NORMAL && !knuckles.preventclimbing)
     {
-        
         // Check if we are colliding with a wall, and if so, cling to it.
-        // TODO: refactor wall_cling so that -1 represents the left wall and 1 represents the right wall.
 
         // This needs to be set for the collision checking functions.
         D5.u8 = char.layer_flags2
@@ -566,21 +573,26 @@ function void Character.CheckCollision()
             // If a collision was detected and the rotation of the tile is a 90° angle..
             if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
             {
-                wall_cling = 2
+                wall_cling = -1
                 cling_timer = 0
             }
         }
-        // No need to do any kind of position management. The base function will handle that for us.
+        // No need to do any kind of position adjustments. The base function will handle that for us.
     }
     base.Character.CheckCollision()
     // If we are clinging to a wall...
-    if (wall_cling == 1 || wall_cling == 2)
+    if (wall_cling == 1 || wall_cling == -1)
     {
         // Remove all velocity and play the sound.
         // NOTE: Clinging to walls disables a lot of character code, including this function. (See the next hook
         // for more details.) So this block will only run once when the wall first gets grabbed.
         char.velocity.x = 0
         char.velocity.y = 0
+        if (wall_cling == -1)
+            char.flags |= char.flag.FACING_LEFT
+        else
+            char.flags &= ~char.flag.FACING_LEFT
+        
         playSound(SFX_GRAB)
     }
 }
@@ -599,7 +611,6 @@ function void Character.UpdateSonicRollingInAir()
         if (control.player1.pressed & CONTROL_ABC)
         {
             // Jump off the wall.
-            debugLog("wall jump")
             char.velocity.y = -0x680
             char.velocity.x = (wall_cling == 1) ? -0x240 : 0x240
             if (char.flags & char.flag.UNDERWATER)
@@ -615,14 +626,12 @@ function void Character.UpdateSonicRollingInAir()
             // The player cannot move in this state, but other objects might push the character. We need to check for this.
             // This needs to be set for the collision checking functions.
             D5.u8 = char.layer_flags2
-            if (wall_cling == 1)
-            {
-                Character.CheckRightWallCollision()
-            }
-            else if (wall_cling == 2)
-            {
+            if (wall_cling == -1)
                 Character.CheckLeftWallCollision()
-            }
+
+            else if (wall_cling == 1)
+                Character.CheckRightWallCollision()
+            
             // This value should be exactly 0. If it is not, something pushed us left or right.
             if (D1.s16 != 0)
             {
@@ -779,52 +788,13 @@ function void Character.HurtCheckForStateChange()
 ///      WIN POSE      ///
 //////////////////////////
 
-//TODO: Now that bouncing happens at the end of the frame instead of during, could this whole section be removed?
-
-//# address-hook(0x083912) end(0x083936)
-function void fn083912()
-{
-    // Signpost
-    waiting_for_win_pose = 1
-    base.fn083912()
-}
-
-//# address-hook(0x0868f8) end(0x086930)
-function void fn0868f8()
-{
-    // Capsule
-    if (objA0.countdown_value <= 1)
-    {
-        waiting_for_win_pose = 1
-    }
-    base.fn0868f8()
-}
-
-//# address-hook(0x072b46) end(0x072b94)
-function void fn072b46()
-{
-    // LBZ2 post-boss cutscene
-    if (objA0.countdown_value <= 1)
-    {
-        waiting_for_win_pose = 1
-    }
-    base.fn072b46()
-}
-
-//# address-hook(0x0869c6) end(0x0869f4)
-function void StartCharacterWinPose()
-{
-    waiting_for_win_pose = 0
-    base.StartCharacterWinPose()
-}
-
 // Helper function
 function void updateWinPose()
 {
     if (char.state == char.state.WIN_POSE)
     {
         // Advance the custom win pose animation.
-        ++mighty_wp_timer
+        mighty_wp_timer += 1
         // Advance to a new animation frame when the timer reaches the values in the list.
         if (mighty_wp_timer >= WP_TIMES[mighty_wp_frame])
             mighty_wp_frame = min(mighty_wp_frame + 1, 9)
@@ -843,13 +813,13 @@ function void updateWinPose()
 function void updateBouncyBallAnim()
 {
     if (bouncy_ball_state)
-        bouncy_ball_frame++
+        bouncy_ball_frame += 1
     else
         bouncy_ball_frame = 0
     
-    if (bouncy_ball_state == 1 && bouncy_ball_frame > 6)
+    if (bouncy_ball_state == 1 && (bouncy_ball_frame > BOUNCY_BALL_WINDUP))
         bouncy_ball_state = 2
         
-    if (bouncy_ball_frame > 18)
-        bouncy_ball_frame = 7
+    if (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 12)
+        bouncy_ball_frame -= 12
 }
