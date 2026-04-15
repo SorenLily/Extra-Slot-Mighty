@@ -8,13 +8,19 @@ global u16 max_partner_slot
 global bool is_highest_priority
 global bool is_ES
 
-define u16 extra_char_index = u16[A0 + 0x40]
-define u16 extra_partner_index = u16[A0 + 0x42]
-define u8 other_mod_selected = u8[A0 + 0x44]
+global u16 ES_data[99]
+global u32 save_slot_addresses[32]
 
 define bool is_partner = (CHARACTER_BASE == 1)
 
-function void Init()
+function void DataSelect.setup()
+{
+	ES.InitMod()
+	base.DataSelect.setup()
+}
+
+// Helper function
+function void ES.InitMod()
 {
 	if (my_char_slot == 0)
 	{
@@ -22,10 +28,16 @@ function void Init()
 		count(buffer)
 		u32[buffer] = 0
 	}
+	// Clear arrays
+	for (u8 i=0; i<32; i+=1)
+		save_slot_addresses[i] = 0
+	for (u8 i=0; i<99; i+=1)
+		ES_data[i] = 0
+	
 	is_ES = 0
-	base.Init()
 }
 
+// Helper function
 function void count(u32 address)
 {
 	if (u32[address] == 0)
@@ -69,7 +81,7 @@ function u32 getEmptyBuffer(u32 bytes)
 
 function string getCharacterSelectSpriteKey(u8 character)
 {
-	if (u16[A0 + 0x40 + is_partner * 2] == my_char_slot && is_partner == (character == CHARACTER_TAILS) && !other_mod_selected)
+	if (ES_data[getSaveSlotIndex() + is_partner] == my_char_slot && is_partner == (character == CHARACTER_TAILS) && !ES_data[getSaveSlotIndex() + 2])
 		return ("charselect_" + CHAR_KEY)
 
 	return base.getCharacterSelectSpriteKey(character)
@@ -175,6 +187,18 @@ function void DataSelect.setup()
 	// Clear shared memory buffer.
 	u32[buffer_address] = 0
 	base.DataSelect.setup()
+	ES_data[1] = 1
+}
+
+// Helper Function
+function u8 getSaveSlotIndex()
+{
+	for (u8 i=0; i<32; i+=1)
+	{
+		if (A0 == save_slot_addresses[i])
+			return i * 3 + 3
+	}
+	return 0
 }
 
 // dataselect_slot.init()
@@ -182,14 +206,22 @@ function void DataSelect.setup()
 function void fn00d39e()
 {
 	base.fn00d39e()
+	for (u8 i=0; i<32; i+=1)
+	{
+		if (save_slot_addresses[i] == 0)
+		{
+			save_slot_addresses[i] = A0
+			break
+		}
+	}
 	// If this slot is a mighty file...
 	if (save_slot_data & (1 << objA0.flags2e))
 	{
 		// Initialize the save slot object with the correct extra slot values.
 		if (!is_partner)
-			extra_char_index = my_char_slot
+			ES_data[getSaveSlotIndex()] = my_char_slot
 		else
-			extra_partner_index = my_char_slot
+			ES_data[getSaveSlotIndex() + 1] = my_char_slot
 	}
 	
 	if (is_highest_priority)
@@ -197,11 +229,11 @@ function void fn00d39e()
 		u8 char = u8[u32[A0 + 0x30] + 0x02] >> 4
 		constant array<u8> char_array = { 0, 0, 1, 2, 2 }
 		// If an ES character was not found, we need to set the indices for the base character.
-		if (extra_char_index == 0)
-			extra_char_index = char_array[char]
+		if (ES_data[getSaveSlotIndex()] == 0)
+			ES_data[getSaveSlotIndex()] = char_array[char]
 
-		if (extra_partner_index == 0 && (char == 0 || char == 2 || char == 4))
-			extra_partner_index = 1
+		if (ES_data[getSaveSlotIndex() + 1] == 0 && (char == 0 || char == 2 || char == 4))
+			ES_data[getSaveSlotIndex() + 1] = 1
 	}
 }
 
@@ -213,7 +245,7 @@ function void fn00d42c()
 	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
 	base.fn00d42c()
 	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == extra_char_index) && !is_partner && !other_mod_selected)
+	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == ES_data[getSaveSlotIndex()]) && !is_partner && !ES_data[getSaveSlotIndex() + 2])
 	{
 		if (CHARACTER_BASE == 0)
 			levelselect.characters = 4 - levelselect.characters
@@ -230,7 +262,7 @@ function bool fn00d458()
 	u8 result = base.fn00d458()
 	u32 slot_index = (A1 - 0xffffe6ac) / 0x0a
 	// If this is true, we're starting a game on a new save file as an ES character.
-	if ((result == 1) && (my_char_slot == u16[A0 + 0x40 + is_partner * 2]) && !other_mod_selected && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
+	if ((result == 1) && (my_char_slot == ES_data[getSaveSlotIndex() + is_partner]) && !ES_data[getSaveSlotIndex() + 2] && (control.pad1.pressed & (CONTROL_START | CONTROL_A)))
 	{
 		// Mark that this file is an ES character in the persistent data.
 		u32 buffer_address = getEmptyBuffer(4)
@@ -268,6 +300,7 @@ function void fn00d6d0()
 		base.fn00d6d0()
 		return
 	}
+	debugLog(A0)
 	// Character Selection: Allow for selecting higher than the normal maximum character.
 	// D0.u16 is used as the character index for this function.
 	s16 direction = 0
@@ -283,12 +316,12 @@ function void fn00d6d0()
 	}
 
 	u8 max_vanilla_characters = Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3
-	if (!other_mod_selected)
+	if (!ES_data[getSaveSlotIndex() + 2])
 	{
-		if (direction == -1 && extra_char_index == 0 && extra_partner_index == max_partner_slot)
+		if (direction == -1 && ES_data[getSaveSlotIndex()] == 0 && ES_data[getSaveSlotIndex() + 1] == max_partner_slot)
 			D0.u16 = 0
 
-		else if (direction == 1 && extra_char_index == max_char_slot && extra_partner_index == max_partner_slot)
+		else if (direction == 1 && ES_data[getSaveSlotIndex()] == max_char_slot && ES_data[getSaveSlotIndex() + 1] == max_partner_slot)
 			D0.u16 = max_vanilla_characters
 
 		else
@@ -296,36 +329,36 @@ function void fn00d6d0()
 	}
 
 	base.fn00d6d0()
-	if (other_mod_selected)
+	if (ES_data[getSaveSlotIndex() + 2])
 	{
 		if (D0.u16 <= max_vanilla_characters && objA0.animation.timer == 0)
 		{
-			other_mod_selected = 0
-			if (D0.u16 == 0 && extra_char_index == 0 || (D0.u16 == max_vanilla_characters && extra_char_index == max_char_slot))
+			ES_data[getSaveSlotIndex() + 2] = 0
+			if (D0.u16 == 0 && ES_data[getSaveSlotIndex()] == 0 || (D0.u16 == max_vanilla_characters && ES_data[getSaveSlotIndex()] == max_char_slot))
 				return
 		}	
 	}
 	else if (D0.u16 > max_vanilla_characters || objA0.animation.timer != 0)
 	{
-		other_mod_selected = 1
+		ES_data[getSaveSlotIndex() + 2] = 1
 		return
 	}
 	
-	if (other_mod_selected)
+	if (ES_data[getSaveSlotIndex() + 2])
 		return
-	u32 selection_index.packed = getESSelectionIndex(extra_char_index, extra_partner_index, direction)
+	u32 selection_index.packed = getESSelectionIndex(ES_data[getSaveSlotIndex()], ES_data[getSaveSlotIndex() + 1], direction)
 
-	// Store these values in the data select object so we can reference it during rendering.
-	// These bytes are unused, so it should be fine. I'd rather do this with an array, but we don't have those.
-	extra_char_index = u16(selection_index.packed & 0xffff)
-	extra_partner_index = u16(selection_index.packed >> 16)
+	// Store these values so we can reference them during rendering.
+	ES_data[getSaveSlotIndex()] = u16(selection_index.packed & 0xffff)
+	ES_data[getSaveSlotIndex() + 1] = u16(selection_index.packed >> 16)
 	// Map the custom char values to the correct values of D0.u16
-	D0.u16 = mapESSelectionToVanilla(extra_char_index, extra_partner_index)
+	D0.u16 = mapESSelectionToVanilla(ES_data[getSaveSlotIndex()], ES_data[getSaveSlotIndex() + 1])
+	debugLog(selection_index.packed)
 }
 
 function u8 getSelectedESCharBase()
 {
-	if (my_char_slot == u16[A0 + 0x40 + is_partner * 2])
+	if (my_char_slot == ES_data[getSaveSlotIndex() + is_partner])
 		return CHARACTER_BASE
 
 	return base.getSelectedESCharBase()
@@ -337,7 +370,7 @@ function void fn00d30c()
 	base.fn00d30c()
 	if (!is_highest_priority)
 		return
-	
+	debugLog("Hi")
 	u8 selected_char_base = getSelectedESCharBase()
 	if (selected_char_base)
 	{
@@ -345,17 +378,22 @@ function void fn00d30c()
 		if (selected_char_base == 1)
 			levelselect.characters = 4 - levelselect.characters
 	}
+	debugLog(dataselect.nosave_characters)
 }
 
 function void fn001506()
 {
 	if (D1 == 2 && D2 == 4)
 	{
-		if ((my_char_slot == u16[A3 + 0x40] && !is_partner) || (my_char_slot == u16[A3 + 0x42] && is_partner && u16[A3 + 0x40] == 1) && !other_mod_selected)
+		u32 a0_backup = A0
+		A0 = A3
+		if ((my_char_slot == ES_data[getSaveSlotIndex()] && !is_partner) || (my_char_slot == ES_data[getSaveSlotIndex() + 1] && is_partner && ES_data[getSaveSlotIndex()] == 1) && !ES_data[getSaveSlotIndex() + 2])
 		{
+			A0 = a0_backup
 			// Prevent the life and continue icons from being drawn on this save slot object.
 			return
 		}
+		A0 = a0_backup
 	}
 	base.fn001506()
 }
@@ -396,6 +434,7 @@ function void ActSelect.Menu(u8 fadeInMethod)
 	// This is the "entry" function of Act Select. It runs in an infinite loop until
 	// the player exits or starts a game. As such we can't do much with this function.
 	// But we do need to initialize the custom selection index to Sonic+Tails.
+	ES.InitMod()
 	act_select_char_index = 0
 	act_select_partner_index = 1
 	act_select_other_mod_selected = 0
@@ -490,7 +529,6 @@ function string capitalizeFirstChar(string str)
 
 function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedAct, s16 anchorX)
 {
-	
 	// There isn't a good place to manage the selection index, but this function is good enough I suppose.
 	bool skip = false
 	u8 max_vanilla_characters = Game.isSecretUnlocked(SECRET_KNUX_AND_TAILS) ? 4 : 3
@@ -541,13 +579,9 @@ function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedA
 		return
 
 	// Draw the character sprites
-	// The buffer and A0 are not strictly necessary, but they're being used due to how
-	// getCharacterSelectSpriteKey() is set up.
-	u32 buffer = getEmptyBuffer(4)
-	u32 a0_temp = A0
-	A0 = buffer - 0x40
-	u16[buffer] = act_select_char_index
-	u16[buffer + 2] = act_select_partner_index
+	
+	ES_data[0] = act_select_char_index
+	ES_data[1] = act_select_partner_index
 
 	// The unmodded sprite keys are "menu_characters_*"
 	s16 px = max(anchorX - 125, 52)
@@ -578,7 +612,4 @@ function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedA
 
 		Renderer.drawSprite(char1, px - x_offset, py, 0, flip, 0xf005)
 	}
-
-	A0 = a0_temp
-	u32[buffer] = 0
 }

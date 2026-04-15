@@ -34,7 +34,9 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		else if (hammer_drop_rebound >= 7)
 		{
 			if (hammer_drop_rebound == 12)
+			{
 				return "mighty_hammer_drop_0x01"
+			}
 			else
 			{
 				char.render_flags ^= render_flag.FLIP_Y
@@ -96,10 +98,11 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		spr.setPriorityFlag(objA0.sprite_attributes & sprite_attribute.PRIORITY)
 		return true
 	}
-	// Lives and continue icons in the data select screen.
 	// Don't modify this condition.
-	if (objA0.update_address == 0x00d42c && ((my_char_slot == u32[A0 + 0x40] && !is_partner) || (my_char_slot == u32[A0 + 0x44] && is_partner && u32[A0 + 0x40] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started && !u8[A0 + 0x48])
+	// If this is a save slot object and this ES character is selected and the save file is not new and we are not fading out from starting a new game and a different ES mod is not being selected...
+	if (objA0.update_address == 0x00d42c && ((my_char_slot == ES_data[getSaveSlotIndex()] && !is_partner) || (my_char_slot == ES_data[getSaveSlotIndex() + 1] && is_partner && ES_data[getSaveSlotIndex()] == 1)) && u8[u32[A0 + 0x30]] != 0x80 && !new_game_started && !ES_data[getSaveSlotIndex() + 2])
 	{
+		// Draw the life and continue icons for the ES character.
 		SpriteHandle spr1 = Renderer.addSpriteHandle("lives_icon_mighty", px-16, py+8, renderQueue)
 		SpriteHandle spr2 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px-16, py+26, renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
