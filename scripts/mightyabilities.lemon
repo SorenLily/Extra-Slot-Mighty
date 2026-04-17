@@ -10,6 +10,8 @@ global u8 bouncy_ball_state
 global s8 wall_cling
 // Timer that allows clinging to walls.
 global u8 cling_timer
+// State for spindashing while clinging to a wall.
+global u8 wall_spindash_state
 // State for blocking damage from spike collisions.
 global u8 block_spikes
 // Animation value for bouncy ball state.
@@ -593,6 +595,7 @@ function void Character.CheckCollision()
         else
             char.flags &= ~char.flag.FACING_LEFT
         
+        bouncy_ball_state = 0
         playSound(SFX_GRAB)
     }
 }
@@ -606,22 +609,45 @@ function void Character.UpdateSonicRollingInAir()
         // This branch deliberately does not call the base function. This disables most of the update code
         // that would be run for the character, which essentially freezes the character in place and prevents
         // all normal controls. This works great for the wall cling, and the player can jump off to end it.
-
-        // If jump was pressed...
-        if (control.player1.pressed & CONTROL_ABC)
+        
+        if (wall_spindash_state)
         {
-            // Jump off the wall.
-            char.velocity.y = -0x680
-            char.velocity.x = (wall_cling == 1) ? -0x240 : 0x240
-            if (char.flags & char.flag.UNDERWATER)
+            wall_spindash_state += 1
+            char.position.y += (global.inv_gravity) ? 0x8000 : -0x8000
+            if (wall_spindash_state == 0x96 || !(control.player1.state & (CONTROL_UP | CONTROL_DOWN)))
             {
-                char.velocity.y >>= 1
+                /*
+                char.velocity.y = -(0x400 + (wall_spindash_state >> 3) * 0x40)
+                if (global.inv_gravity)
+                    char.velocity.y = -char.velocity.y
+                if (char.flags & char.flag.UNDERWATER)
+                    char.velocity.y >>= 1
+                */
+                jumpOffWall()
+                char.state = char.state.ROLLING
+                wall_spindash_state = 0
+
+                // End the wall cling.
+                wall_cling = 0
+                char.double_jump_state = 0
             }
-            // End the wall cling.
-            wall_cling = 0
-            char.double_jump_state = 0
         }
-        else
+        // If jump was pressed...
+        else if ((control.player1.pressed & CONTROL_ABC))
+        {
+            if (!(control.player1.state & (CONTROL_UP | CONTROL_DOWN)))
+            {
+                jumpOffWall()
+            }
+            else
+            {
+                wall_spindash_state = 1
+                char.state = char.state.SPINDASH
+                playSound(SFX_SPINDASH_CHARGE)
+            }
+        }
+        
+        if (wall_cling)
         {
             // The player cannot move in this state, but other objects might push the character. We need to check for this.
             // This needs to be set for the collision checking functions.
@@ -631,12 +657,12 @@ function void Character.UpdateSonicRollingInAir()
 
             else if (wall_cling == 1)
                 Character.CheckRightWallCollision()
-            
             // This value should be exactly 0. If it is not, something pushed us left or right.
             if (D1.s16 != 0)
             {
                 // If so, end the wall cling.
                 wall_cling = 0
+                wall_spindash_state = 0
                 setRollingState()
             }
         }
@@ -644,6 +670,22 @@ function void Character.UpdateSonicRollingInAir()
         return
     }
     base.Character.UpdateSonicRollingInAir()
+}
+
+// Helper function
+function void jumpOffWall()
+{
+    // Jump off the wall.
+    char.velocity.y = (global.inv_gravity) ? 0x4c0 : -0x4c0
+    char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
+    if (char.flags & char.flag.UNDERWATER)
+        char.velocity.y >>= 1
+
+    // End the wall cling.
+    wall_cling = 0
+    wall_spindash_state = 0
+    char.double_jump_state = 0
+    playSound(SFX_JUMP)
 }
 
 //////////////////////////

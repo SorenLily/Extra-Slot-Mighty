@@ -29,7 +29,7 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
-		else if (wall_cling)
+		else if (wall_cling && !wall_spindash_state)
 			return "mighty_grab_wall"
 		else if (hammer_drop_rebound >= 7)
 		{
