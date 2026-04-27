@@ -115,8 +115,6 @@ function void Character.BaseUpdate.Knuckles()
         char.character = CHARACTER_KNUCKLES
         global.characters = CHARS_KNUCKLES_ALONE
     }
-    debugLog(stringformat("Bouncy Ball State: %x", bouncy_ball_state))
-    debugLog(stringformat("Hammer Drop State: %x", hammer_drop_state))
     return
 }
 
@@ -247,13 +245,15 @@ function void Character.updateJumpMoves()
         if ((control.pad1.state & CONTROL_ABC) && (char.state != char.state.LIFTED) && !isFloating())
         {
             // Enter bouncy ball state. Note that bouncy ball state must be >= 2 to have an effect.
-            bouncy_ball_state = max(bouncy_ball_state, 1)
+            // BOUNCY BALL DISABLED
+            //bouncy_ball_state = max(bouncy_ball_state, 1)
         }
         // If jump was pressed and we're not clinging to a wall...
         if ((control.pad1.pressed & CONTROL_ABC) && !wall_cling)
         {
             // Start the timer to allow clinging to walls.
-            cling_timer = 1
+            // WALL CLING DISABLED
+            //cling_timer = 1
         }
     }
     // If in bouncy ball state and no longer holding jump...
@@ -298,6 +298,9 @@ function void SonicPressedJumpInMidAir()
             hammer_drop_direction = -1
         else if (control.pad1.state & CONTROL_RIGHT)
             hammer_drop_direction = 1
+        
+        if (!hammer_drop_direction)
+            char.velocity.x >>= 1
     }
 }
 
@@ -315,12 +318,12 @@ function void Character.UpdateControlInAir()
     {
         s16 maxSpeed = s16[A4]
 		s16 acceleration = s16[A4 + 2]
-        s16 dv = (acceleration >> 2) * 3
+        s16 dv = 0//(acceleration >> 2) * 3
         // If this is true, then air drag was applied to the character.
         if (char.velocity.y < 0 && char.velocity.y >= -0x400)
         {
-            // Undo the air drag.
-            char.velocity.x += (char.velocity.x >> 5) + (char.velocity.x >> 10)
+            // Undo half of the air drag.
+            char.velocity.x += (char.velocity.x >> 6) + (char.velocity.x >> 11)
         }
         // Allow extra acceleration during bouncy ball while pressing directions.
         if (control.player1.state & CONTROL_LEFT)
@@ -347,17 +350,23 @@ function void Character.UpdateControlInAir()
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
-        s16 dy = (hammer_drop_direction ? 0x78 : 0xc0)
+        s16 dy = (hammer_drop_direction ? 0x99 : 0xd8)
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
 
         // Cancel any upward y-velocity the player has, and accelerate.
         char.velocity.y = clamp(char.velocity.y + dy, 0, 0x1000)
         // Add x-velocity in the appropriate direction (none if going down).
+        
         char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
     }
     if (hammer_drop_rebound)
         hammer_drop_rebound--
+    
+    // Limit velocity.y
+	s16 max_vy = (char.flags & char.flag.UNDERWATER) ? -0x200 : -0x400
+    if (bouncy_ball_state && !(control.player1.state & CONTROL_ABC) && char.velocity.y < max_vy)
+        char.velocity.y = min(char.velocity.y + 0x80, max_vy)
 }
 
 function void Character.LandingOnGroundResetState()
@@ -391,12 +400,8 @@ function void Character.LandingOnGroundResetState()
     }
 }
 
-// Helper function
 function void mightyBounce()
 {
-    // NOTE: This is a heavily modified version of SonicLandingBubbleBounce().
-    // TODO: This whole function is messy and needs more work. See if it can be improved.
-
     s16 vx = velocity.x.copy
     s16 vy = velocity.y.copy
     velocity.x.copy = 0
@@ -404,103 +409,48 @@ function void mightyBounce()
 
     // The angle of our movement.
     u8 move_angle = lookupAngleByVector(vx, vy)
-    // The angle of the tile we're standing on.
-    u8 ground_angle = char.rotation
-    u8 reflected_angle = 0
-    u8 slide = 0
-    // For shallow enough angles...
-    if (true)//(char.rotation <= 0x28 || char.rotation >= 0xd0)
-    {
-        // Reflect off of them
-        reflected_angle = ground_angle * 2 - move_angle
-    }
-    else // For steep angles...
-    {
-        // Instead of bouncing off, we'll stick to the slope and try to slide along it.
-        debugLog("slide")
-        slide = 1
-        reflected_angle = ground_angle
-        if (hammer_drop_state)
-            reflected_angle += 0x80
-    }
-    
-    if (bouncy_ball_state >= 2)
-    {
-        // Increment bouncy_ball_state every time it bounces.
-        bouncy_ball_state = min(bouncy_ball_state + 1, BOUNCY_BALL_MAX)
-    }
-    // Now we'll actually calculate the velocity.
+    // The angle to bounce toward.
+    u8 reflected_angle = char.rotation - 0x40
     s16 force = 0
     if (hammer_drop_state)
     {
-        // The formula is simple for the hammer drop state.
-        force = 0x600 + (max(hammer_drop_state, 8) - 8) * 0x30
-        force += (max(bouncy_ball_state, 2) - 2) * 0x100
-        force = min(0xa00, force)
-        bouncy_ball_state = 0
+        force = 0x600 + (max(hammer_drop_state, 6) - 6) * 0x38
     }
-    else if (bouncy_ball_state >= 2)
+    else if (bouncy_ball_state)
     {
-        // Get the magnitude of our current velocity, then increment it based on bouncy_ball_state, and clamp.
-        // TODO: This probably needs to be modified, especially to deal with slopes.
-        force = sqrt(square(s32(abs(char.velocity.x))) + square(s32(abs(char.velocity.y))))
-        force += 0x80 * (bouncy_ball_state)
-        force = clamp(force, 0x600, 0xc00)
-    }
-    if (hammer_drop_state || slide)
-    {
-        if (slide)
-        {
-            // Add extra force.
-            force += force >> 2
-            if (hammer_drop_state)
-                reflected_angle += 0x80 // ???
-        }
-        // Standard velocity calculation for this game.
-        char.velocity.x = (s32(lookupCos(reflected_angle)) * force) >> 8
-        char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
-    }
-    else if (bouncy_ball_state >= 2)
-    {
-        // Set the y-velocity the standard way.
-        char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
-        // Set the x-velocity more directly so that it can go faster without affecting y-velocity.
-        // TODO: this probably needs to be modified and take the force value into account.
-        char.velocity.x = 0x480 + 0x140 * (bouncy_ball_state - 2)
-        char.velocity.x = (s32(lookupCos(reflected_angle)) > 0) ? char.velocity.x : -char.velocity.x
-        // If pressing left/right in the opposite direction of the bounce...
-        if ((char.velocity.x > 0 && (control.player1.state & CONTROL_LEFT)) || (char.velocity.x < 0 && (control.player1.state & CONTROL_RIGHT)))
-        {
-            // Flip the x-velocity and decrease it somewhat.
-            char.velocity.x = -(char.velocity.x - (char.velocity.x >> 2))
-        }
-        char.velocity.x = clamp(char.velocity.x, -0x800, 0x800)
+        force = sqrt(square(s32(abs(vx))) + square(s32(abs(vy))))
+        force += 0x50
+        force = clamp(force, 0x400, 0xc00)
     }
 
-    // Underwater movement penalty.
+    char.velocity.x += (s32(lookupCos(reflected_angle)) * force) >> 8
+    char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
+
+    if (global.inv_gravity)
+        char.velocity.y = -char.velocity.y
+
     if (char.flags & char.flag.UNDERWATER)
     {
         char.velocity.x >>= 1
         char.velocity.y >>= 1
-        /*
-        char.velocity.x >>= 3
-        char.velocity.x *= 5
-        char.velocity.y >>= 3
-        char.velocity.y *= 5
-        */
     }
 
-    //debugLog(char.velocity.x)
-    //debugLog(char.velocity.y)
-
     setRollingState()
-    if (!slide)
+    // Set the necessary flags to represent being in the air.
+    char.flags |= char.flag.IN_AIR
+    char.flags &= ~char.flag.PUSHING
+    char.jumping = 1
+    char.on_convex_surface = 0
+
+    if (hammer_drop_state)
     {
-        // Set the necessary flags to represent being in the air.
-        char.flags |= char.flag.IN_AIR
-        char.flags &= ~char.flag.PUSHING
-        char.jumping = 1
-        char.on_convex_surface = 0
+        bouncy_ball_state = 2
+    }
+    else if (bouncy_ball_state)
+    {
+        bouncy_ball_state += 1
+        if (bouncy_ball_state == BOUNCY_BALL_MAX)
+            bouncy_ball_state = 0
     }
 }
 
@@ -523,13 +473,14 @@ function void Character.OnCollisionWithDynamicObject()
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
     // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6)))
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state))
     {
         // Grant invincibility for collisions.
-        u8 bonus_effect_temp = char.bonus_effect & char.bonus.INVINCIBLE
+        u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
         char.bonus_effect |= char.bonus.INVINCIBLE
         base.Character.CheckCollisionsWithDynamicObjects_partial()
-        char.bonus_effect = bonus_effect_temp
+        char.bonus_effect &= ~char.bonus.INVINCIBLE
+        char.bonus_effect |= invincible_flag_temp
     }
     else
     {
@@ -783,6 +734,19 @@ function void fn01f528()
     }
 }
 
+//# address-hook(0x08b4ec) end(0x08b526)
+function void fn08b4ec()
+{
+    // ICZ ice crystals
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn08b4ec()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
 //# address-hook(0x010294) end(0x010364)
 function void Character.GettingHurt()
 {
@@ -859,7 +823,7 @@ function void updateBouncyBallAnim()
     else
         bouncy_ball_frame = 0
     
-    if (bouncy_ball_state == 1 && (bouncy_ball_frame > BOUNCY_BALL_WINDUP))
+    if (bouncy_ball_state == 1)// && (bouncy_ball_frame > BOUNCY_BALL_WINDUP))
         bouncy_ball_state = 2
         
     if (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 12)

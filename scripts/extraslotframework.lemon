@@ -287,6 +287,12 @@ function bool fn00d458()
 				levelselect.characters = 4 - levelselect.characters
 			is_ES = 1
 		}
+		// Save ES data anyway.
+		u32 buffer_address = getEmptyBuffer(4)
+		u32[buffer_address] = save_slot_data
+		System.savePersistentData(buffer_address, (UNIQUE_ID + "_save_data"), 4)
+		// Clear the buffer.
+		u32[buffer_address] = 0
 	}
 	return result
 }
@@ -300,7 +306,6 @@ function void fn00d6d0()
 		base.fn00d6d0()
 		return
 	}
-	debugLog(A0)
 	// Character Selection: Allow for selecting higher than the normal maximum character.
 	// D0.u16 is used as the character index for this function.
 	s16 direction = 0
@@ -353,7 +358,6 @@ function void fn00d6d0()
 	ES_data[getSaveSlotIndex() + 1] = u16(selection_index.packed >> 16)
 	// Map the custom char values to the correct values of D0.u16
 	D0.u16 = mapESSelectionToVanilla(ES_data[getSaveSlotIndex()], ES_data[getSaveSlotIndex() + 1])
-	debugLog(selection_index.packed)
 }
 
 function u8 getSelectedESCharBase()
@@ -370,7 +374,6 @@ function void fn00d30c()
 	base.fn00d30c()
 	if (!is_highest_priority)
 		return
-	debugLog("Hi")
 	u8 selected_char_base = getSelectedESCharBase()
 	if (selected_char_base)
 	{
@@ -378,7 +381,6 @@ function void fn00d30c()
 		if (selected_char_base == 1)
 			levelselect.characters = 4 - levelselect.characters
 	}
-	debugLog(dataselect.nosave_characters)
 }
 
 function void fn001506()
