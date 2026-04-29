@@ -83,6 +83,8 @@ function void Character.Initialization.shared(u8 character)
     hammer_drop_rebound = 0
     bouncy_ball_state = 0
     bouncy_ball_frame = 0
+    bowling_ball_state = 0
+    bowling_ball_animation_state = 0
     wall_cling = 0
     cling_timer = 0
     block_spikes = 0
@@ -143,10 +145,15 @@ function void Character.BaseUpdate.Sonic()
         wall_cling = 0
         cling_timer = 0
     }
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed < 0x800 || abs(char.velocity.x) < 0x100))
+    {
+        bowling_ball_state = 0
+    }
     base.Character.BaseUpdate.Sonic()
     // Update custom animations.
     updateWinPose()
     updateBouncyBallAnim()
+    updateBowlingBallAnim()
 }
 
 function void updateGameObjectLoop()
@@ -199,10 +206,18 @@ function bool Character.CheckStartJump()
     }
     else
     {
+        s16 vx_temp = char.velocity.x
+        s16 vy_temp = char.velocity.y
         // Pretend to be Knuckles to get the lower jump height.
         char.character = CHARACTER_KNUCKLES
         result = base.Character.CheckStartJump()
         char.character = CHARACTER_SONIC
+
+        if (result && bowling_ball_state)
+        {
+            char.velocity.x -= (char.velocity.x - vx_temp) >> 4
+            char.velocity.y -= (char.velocity.y - vy_temp) >> 4
+        }
     }
     return result
 }
@@ -346,6 +361,16 @@ function void Character.UpdateControlInAir()
         centerCameraYOffset()
     }
 
+    if (bowling_ball_state)
+    {
+        if (char.velocity.y < 0 && char.velocity.y >= -0x400)
+        {
+            // Undo the air drag.
+            s16 dv = (char.velocity.x >> 5) + (char.velocity.x >> 10)
+            char.velocity.x += dv
+        }
+    }
+
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
@@ -397,6 +422,10 @@ function void Character.LandingOnGroundResetState()
     else if (bouncy_ball_state >= 2 && !(control.player1.state & CONTROL_ABC) && !hammer_drop_state)
     {
         bouncy_ball_state = 0
+    }
+    else if (bowling_ball_state)
+    {
+        setRollingState()
     }
 }
 
@@ -473,7 +502,7 @@ function void Character.OnCollisionWithDynamicObject()
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
     // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state))
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || bowling_ball_state))
     {
         // Grant invincibility for collisions.
         u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
@@ -639,6 +668,95 @@ function void jumpOffWall()
     playSound(SFX_JUMP)
 }
 
+global u8 rolling_animation_delay
+global u8 bowling_ball_state
+global u8 bowling_ball_animation_state
+
+//# translated(0x011bde) end(0x011cf0)
+//# translated(0x011d16) end(0x011da4)
+//# translated(0x0151fc) end(0x01530c)
+//# translated(0x015332) end(0x0153c0)
+function bool Character.UpdateSpindash()
+{
+    bool result = base.Character.UpdateSpindash()
+    if (!result && !Game.getSetting(SETTING_SUPER_PEELOUT) && is_ES)
+    {
+        result = Character.updateSuperPeelout()
+    }
+    return result
+}
+
+function bool Character.updateSuperPeelout()
+{
+    u16 spindash_charge_temp = char.spindash_charge
+    bool result = base.Character.updateSuperPeelout()
+    if (isMighty() && result)
+    {
+        /*
+        if (~char.animation.frame & 1)
+        {
+            rolling_animation_delay = (rolling_animation_delay + 1) % 3
+            char.animation.timer += rolling_animation_delay ? 1 : 0
+        }
+        */
+        if (char.spindash_charge < 0x800)
+            char.spindash_charge -= 0x30
+        
+        if (char.spindash_charge == 0x400 || (spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
+            Audio.playAudio("peelout_charge", AudioContext.CONTEXT_SOUND)
+    }
+    return result
+}
+
+function void releaseSuperPeelout()
+{
+    if (isMighty() && char.spindash_charge >= 0x800)
+    {
+        char.groundspeed >>= 2
+        char.groundspeed *= 5
+    }
+    base.releaseSuperPeelout()
+    if (isMighty())
+    {
+        bowling_ball_state = 1
+        bowling_ball_animation_state = 0
+        setRollingState()
+    }
+}
+
+function void Character.updateUprightOnGroundInner()
+{
+    base.Character.updateUprightOnGroundInner()
+    if (bowling_ball_state && !(char.bonus_effect & char.bonus.INFINITE_INERTIA))
+    {
+        // Undo half of ground friction.
+        if (char.groundspeed != 0)
+        {
+            u16 dv = 0xc
+            //dv >>= 1
+            if (char.groundspeed < 0)
+                dv = -dv
+            
+            char.groundspeed += dv
+        }
+    }
+}
+
+function void fn00730c()
+{
+    if (A1 == 0xffffb000 && is_ES && bowling_ball_state && !(u8[A1 + 0x2a] & char.flag.ON_OBJECT))
+    {
+        u8 flags_temp = u8[A1 + 0x2a]
+        u8[A1 + 0x2a] |= char.flag.IN_AIR
+        base.fn00730c()
+        u8[A1 + 0x2a] = flags_temp
+    }
+    else
+    {
+        base.fn00730c()
+    }   
+}
+
 //////////////////////////
 ///       SPIKES       ///
 //////////////////////////
@@ -747,6 +865,19 @@ function void fn08b4ec()
         block_spikes = 0
 }
 
+//# address-hook(0x0411d8) end(0x04120a)
+//# translated(0x04121e) end(0x04126c)
+function void fn0411d8()
+{
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn0411d8()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
 //# address-hook(0x010294) end(0x010364)
 function void Character.GettingHurt()
 {
@@ -828,4 +959,18 @@ function void updateBouncyBallAnim()
         
     if (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 12)
         bouncy_ball_frame -= 12
+}
+
+function void updateBowlingBallAnim()
+{
+    if (char.spindash == 0x80)
+    {
+        bowling_ball_animation_state += min((char.spindash_charge >> 7), 0xc)
+        bowling_ball_animation_state = bowling_ball_animation_state & 0x3f
+    }
+
+    if (bowling_ball_state)
+        bowling_ball_animation_state += 0xc
+
+    bowling_ball_animation_state &= 0x3f
 }

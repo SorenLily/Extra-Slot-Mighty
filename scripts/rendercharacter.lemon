@@ -22,6 +22,14 @@ function string getCharacterBluespherePaletteKey(u8 character)
 	return base.getCharacterBluespherePaletteKey(character)
 }
 
+function string getCharacterLivesIcon(u8 character)
+{
+	if (is_ES && character == CHARACTER_KNUCKLES)
+		return "hud_lives_icon_mighty"
+	
+	return base.getCharacterLivesIcon(character)
+}
+
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
 	if (is_ES && character == CHARACTER_BASE)
@@ -59,7 +67,13 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		else if (bouncy_ball_frame > BOUNCY_BALL_WINDUP && (control.player1.state & CONTROL_ABC))
 		{
 			str = "mighty_bounce_"
-			str += (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 6) ? "2" : "1"
+			str += (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 6) ? "1" : "0"
+			return str
+		}
+		else if (bowling_ball_state || char.spindash == 0x80)
+		{
+			str += "mighty_superball_"
+			str += stringformat("0x%02x", (bowling_ball_animation_state >> 4))
 			return str
 		}
 		else
@@ -107,6 +121,12 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		SpriteHandle spr2 = Renderer.addSpriteHandle("continue_icon_mighty_wait_0x00", px-16, py+26, renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+8, renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+32, renderQueue)
+	}
+
+	if (A0 == 0xffffb000 && is_ES)
+	{
+		if (char.spindash == 0x80)
+			py += 0x4
 	}
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
 }
