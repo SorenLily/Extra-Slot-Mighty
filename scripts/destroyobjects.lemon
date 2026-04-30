@@ -50,13 +50,12 @@ function void tagObjectForVdpBurst(u32 obj_address, u8 burst_type)
 
 function void RenderSprites()
 {
-	if (Input.getController(0) & ~Input.getControllerPrevious(0) & CONTROL_X)
-	{
-		thanosSnap()
-		playSound(SFX_COLLAPSE)
-	}
 	base.RenderSprites()
+	updateVdpBursts()
+}
 
+function void updateVdpBursts()
+{
 	for (u8 i = 0; i < LIST_SIZE; i += VDP_BURST_OBJ_SIZE)
 	{
 		if (tagged_objects[i] == 0)
@@ -238,10 +237,13 @@ function u32 applyBurstPattern(s16 x_offset, s16 y_offset, u64 sprite_dimensions
 	sprite_dimensions >>= 16
 	s16 sprite_center.y = s16(sprite_dimensions & 0xffff)
 
+	// Simple burst
 	if (burst_type == 0)
 		return simpleBurstPattern(x_offset, y_offset, sprite_center.x, sprite_center.y, burst_timer)
+	// Left burst
 	else if (burst_type == 1)
 		return horizontalBurstPattern(x_offset, y_offset, sprite_center.y, left_edge, right_edge, burst_timer, true)
+	// Right burst
 	else if (burst_type == 2)
 		return horizontalBurstPattern(x_offset, y_offset, sprite_center.y, left_edge, right_edge, burst_timer, false)
 	
@@ -272,19 +274,4 @@ function u32 horizontalBurstPattern(s16 x_offset, s16 y_offset, s16 sprite_cente
 
 	u32 result = (u32(y_offset) << 16) | u16(x_offset)
 	return result
-}
-
-function void thanosSnap()
-{
-	u32 a0_temp = A0
-	for (u32 i = 0xffffb128; i < 0xffffcb2c; i += 0x4a)
-	{
-		if (u32[i] == 0)
-			continue
-		
-		tagObjectForVdpBurst(i, 1)
-		A0 = i
-		UnloadObject()
-	}
-	A0 = a0_temp
 }

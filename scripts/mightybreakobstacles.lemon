@@ -1,0 +1,128 @@
+include destroyobjects
+
+function void destroyObstacles()
+{
+	// This is a heavily modified version of Character.CheckCollisionsWithDynamicObjects()
+
+	// The game stores a list of objects on screen that the player can normally collide with during
+	// Character.CheckCollisionsWithDynamicObjects(). I refer to these as "interactible" objects.
+	// We're going to use this list to see if the object is interactible, but also allow for colliding
+	// with other types of objects as needed.
+	u16 num_interactibles = global.dynamic_objects.size >> 1
+	u32 interactible_index = addressof(global.dynamic_objects.size) + 2
+	
+	// Loop through all (relevant) dynamic object slots.
+	// Addresses outside this range are all reserved and would never participate in this collision logic.
+	for (u32 dynamic_address = 0xffffb128; dynamic_address <= 0xffffcae2; dynamic_address += 0x4a)
+	{
+		// Using a register isn't necessary, but it makes the syntax nicer.
+		A1 = dynamic_address
+		// If the object is empty, do nothing.
+		if (objA1.update_address == 0)
+			continue
+        
+		// Get the address of the next interactible object from the table (if there is one).
+		u32 next_interactible = 0xffff0000
+		if (num_interactibles)
+			next_interactible += u16[interactible_index]
+
+		// Is the object in the table? If so, it's an interactible.
+		bool is_interactible = (A1 == next_interactible)
+		if (is_interactible)
+		{
+			// Move to the next entry in the table of interactible objects.
+			num_interactibles -= 1
+			interactible_index += 2
+			// Interactibles with no collision attribute data can't collide.
+			if (objA1.collision_attributes == 0)
+				continue
+		}
+
+        // Only proceed with objects that we want Mighty's superball state to break.
+        if (!isBreakableObstacle(u32[A1]))
+            continue
+        
+		// Get the (unsigned) distances between the character and object.
+		u16 dx = abs(s16(objA0.position.x.u16 - objA1.position.x.u16))
+		u16 dy = abs(s16(objA0.position.y.u16 - objA1.position.y.u16))
+		u8 other_hitbox.x = 0
+		u8 other_hitbox.y = 0
+		// Figure out what the hitbox size is.
+		if (is_interactible)
+		{
+			// This is how the game normally accesses the hitbox sizes of interactibles.
+			u32 collision_size_lookup = 0x00ff62 + (objA1.collision_attributes & collision_attributes.size) * 2
+			other_hitbox.x = u8[collision_size_lookup]
+			other_hitbox.y = u8[collision_size_lookup + 1]
+		}
+		else
+		{
+			// Use the object's "box_size" variables.
+			other_hitbox.x = u8[dynamic_address + 0x7]
+			other_hitbox.y = u8[dynamic_address + 0x6]
+		}
+		// This is a slightly simpler way to check for collisions than what the game does.
+		if (dx < (objA0.hitbox_extends.x + other_hitbox.x + 4) && dy < (objA0.hitbox_extends.y + other_hitbox.y + 2))
+		{
+			// Using a register is not necessary, but it makes the syntax nicer.
+            u8 burst_type = 0
+            if (abs(objA0.velocity.x) >= 0x200)
+                burst_type = (objA0.velocity.x < 0) ? 1 : 2
+			tagObjectForVdpBurst(A1, burst_type)
+            if ((char.flags & char.flag.ON_OBJECT) && (A1 == (0xffff0000 + u32(u16[A0 + 0x42]))))
+            {
+                char.flags &= ~char.flag.ON_OBJECT
+                u16[A0 + 0x42] = 0
+            }
+            unloadObjectAt(A1)
+		}
+	}
+}
+
+function bool isBreakableObstacle(u32 update_address)
+{
+    bool result = false
+    for (u8 i = 0; i < obstacle_addresses.length(); i += 1)
+    {
+        if (update_address == obstacle_addresses[i])
+        {
+            result = true
+            break
+        }
+    }
+    return result
+}
+
+constant array<u32> obstacle_addresses =
+{
+    0x24090, // Floor Spikes
+    0x240e2, // Wall Spikes
+    0x2413e,  // Ceiling Spikes
+    0x01faf2, // Rocks
+    0x04172e, // SOZ Rocks
+    0x0341bc, // MGZ Chain Spike Ball
+    0x341fa,
+    0x557c8,
+    0x3b1b2,
+    0x3b1ea,
+    0x3b18c,
+    0x3b1c4,
+    0x4397E, // LRZ Rolling Spike Ball
+    0x435E0,
+    0x43B96,
+    0x43C88,
+    0x02927c, // Spike Crusher
+    0x8B198, // Ice Spikes
+    0x8B1AE,
+    0x8B1D4,
+    0x8B1FA,
+    0x8B2DA,
+    0x8B330,
+    0x8B2A4,
+    0x8B2EE,
+    0x8B310,
+    0x856DE,
+    0x85140,
+    0x8B4EC,
+    0x8B384, // Ice Block
+}
