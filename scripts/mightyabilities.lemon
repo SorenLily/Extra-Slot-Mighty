@@ -83,8 +83,8 @@ function void Character.Initialization.shared(u8 character)
     hammer_drop_rebound = 0
     bouncy_ball_state = 0
     bouncy_ball_frame = 0
-    bowling_ball_state = 0
-    bowling_ball_animation_state = 0
+    super_ball_state = 0
+    super_ball_animation_state = 0
     wall_cling = 0
     cling_timer = 0
     block_spikes = 0
@@ -145,15 +145,16 @@ function void Character.BaseUpdate.Sonic()
         wall_cling = 0
         cling_timer = 0
     }
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed < 0x800 || abs(char.velocity.x) < 0x100))
+
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed) < 0x800 || abs(char.velocity.x) < 0x300)
     {
-        bowling_ball_state = 0
+        super_ball_state = 0
     }
     base.Character.BaseUpdate.Sonic()
     // Update custom animations.
     updateWinPose()
     updateBouncyBallAnim()
-    updateBowlingBallAnim()
+    updateSuperBallAnim()
 }
 
 function void updateGameObjectLoop()
@@ -213,7 +214,7 @@ function bool Character.CheckStartJump()
         result = base.Character.CheckStartJump()
         char.character = CHARACTER_SONIC
 
-        if (result && bowling_ball_state)
+        if (result && super_ball_state)
         {
             char.velocity.x -= (char.velocity.x - vx_temp) >> 4
             char.velocity.y -= (char.velocity.y - vy_temp) >> 4
@@ -361,7 +362,7 @@ function void Character.UpdateControlInAir()
         centerCameraYOffset()
     }
 
-    if (bowling_ball_state)
+    if (super_ball_state)
     {
         if (char.velocity.y < 0 && char.velocity.y >= -0x400)
         {
@@ -423,7 +424,7 @@ function void Character.LandingOnGroundResetState()
     {
         bouncy_ball_state = 0
     }
-    else if (bowling_ball_state)
+    else if (super_ball_state)
     {
         setRollingState()
     }
@@ -443,12 +444,12 @@ function void mightyBounce()
     s16 force = 0
     if (hammer_drop_state)
     {
-        force = 0x600 + (max(hammer_drop_state, 6) - 6) * 0x38
+        force = 0x600 + (max(hammer_drop_state, 8) - 8) * 0x48
     }
     else if (bouncy_ball_state)
     {
         force = sqrt(square(s32(abs(vx))) + square(s32(abs(vy))))
-        force += 0x50
+        force -= 0x100
         force = clamp(force, 0x400, 0xc00)
     }
 
@@ -501,8 +502,11 @@ function void Character.OnCollisionWithDynamicObject()
 //# address-hook(0x00ff06) end(0x00ff5e)
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
+    if (isMighty() && super_ball_state)
+        destroyObstacles()
+    
     // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || bowling_ball_state))
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || super_ball_state))
     {
         // Grant invincibility for collisions.
         u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
@@ -669,8 +673,8 @@ function void jumpOffWall()
 }
 
 global u8 rolling_animation_delay
-global u8 bowling_ball_state
-global u8 bowling_ball_animation_state
+global u8 super_ball_state
+global u8 super_ball_animation_state
 
 //# translated(0x011bde) end(0x011cf0)
 //# translated(0x011d16) end(0x011da4)
@@ -718,8 +722,8 @@ function void releaseSuperPeelout()
     base.releaseSuperPeelout()
     if (isMighty())
     {
-        bowling_ball_state = 1
-        bowling_ball_animation_state = 0
+        super_ball_state = 1
+        super_ball_animation_state = 0
         setRollingState()
     }
 }
@@ -727,7 +731,7 @@ function void releaseSuperPeelout()
 function void Character.updateUprightOnGroundInner()
 {
     base.Character.updateUprightOnGroundInner()
-    if (bowling_ball_state && !(char.bonus_effect & char.bonus.INFINITE_INERTIA))
+    if (super_ball_state && !(char.bonus_effect & char.bonus.INFINITE_INERTIA))
     {
         // Undo half of ground friction.
         if (char.groundspeed != 0)
@@ -742,9 +746,20 @@ function void Character.updateUprightOnGroundInner()
     }
 }
 
+/*
+function void updateCharacterRollingOnGround()
+{
+    base.updateCharacterRollingOnGround()
+    // Activate super ball state while rolling very quickly.
+    if (abs(char.groundspeed) >= 0xe00)
+        super_ball_state = 1
+}
+*/
+
 function void fn00730c()
 {
-    if (A1 == 0xffffb000 && is_ES && bowling_ball_state && !(u8[A1 + 0x2a] & char.flag.ON_OBJECT))
+    // Super ball state ignores sand slides in SOZ.
+    if (A1 == 0xffffb000 && is_ES && super_ball_state && !(u8[A1 + 0x2a] & char.flag.ON_OBJECT))
     {
         u8 flags_temp = u8[A1 + 0x2a]
         u8[A1 + 0x2a] |= char.flag.IN_AIR
@@ -954,23 +969,23 @@ function void updateBouncyBallAnim()
     else
         bouncy_ball_frame = 0
     
-    if (bouncy_ball_state == 1)// && (bouncy_ball_frame > BOUNCY_BALL_WINDUP))
+    if (bouncy_ball_state == 1)
         bouncy_ball_state = 2
         
     if (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 12)
         bouncy_ball_frame -= 12
 }
 
-function void updateBowlingBallAnim()
+function void updateSuperBallAnim()
 {
     if (char.spindash == 0x80)
     {
-        bowling_ball_animation_state += min((char.spindash_charge >> 7), 0xc)
-        bowling_ball_animation_state = bowling_ball_animation_state & 0x3f
+        super_ball_animation_state += min((char.spindash_charge >> 7), 0xc)
+        super_ball_animation_state = super_ball_animation_state & 0x3f
     }
 
-    if (bowling_ball_state)
-        bowling_ball_animation_state += 0xc
+    if (super_ball_state)
+        super_ball_animation_state += 0xc
 
-    bowling_ball_animation_state &= 0x3f
+    super_ball_animation_state &= 0x3f
 }
