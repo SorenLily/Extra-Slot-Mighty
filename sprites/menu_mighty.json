@@ -11,7 +11,7 @@
 	"menu_characters_mighty": { "File": "menu_mighty.png", "Rect": "0,72,28,36", "Center": "14,18" },
 	"continue_icon_mighty": { "File": "menu_mighty.png", "Rect": "58,75,19,24",  "Center": "12,24" },
 
-	"result_nameplate_mighty": { "File": "menu_mighty.png", "Rect": "0,109,87,16" },
+	"result_nameplate_mighty": { "File": "menu_mighty.png", "Rect": "0,109,87,16", "Center": "-32, 0" },
 	"result_nameplate_mighty_super": { "File": "menu_mighty.png", "Rect": "0,125,74,16" },
 	"result_nameplate_mighty_hyper": { "File": "menu_mighty.png", "Rect": "0,141,74,16" },
 	"monitor_icon_mighty": { "File": "menu_mighty.png", "Rect":"16,56,16,16", "Center": "8,8" }

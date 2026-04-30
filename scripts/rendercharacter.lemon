@@ -30,6 +30,14 @@ function string getCharacterLivesIcon(u8 character)
 	return base.getCharacterLivesIcon(character)
 }
 
+function string getCharacterResultsNameplate(u8 character)
+{
+	if (is_ES && character == CHARACTER_KNUCKLES)
+		return "result_nameplate_mighty"
+	
+	return base.getCharacterResultsNameplate(character)
+}
+
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
 	if (is_ES && character == CHARACTER_BASE)
@@ -70,10 +78,10 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			str += (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 6) ? "1" : "0"
 			return str
 		}
-		else if (bowling_ball_state || char.spindash == 0x80)
+		else if (super_ball_state || char.spindash == 0x80)
 		{
 			str += "mighty_superball_"
-			str += stringformat("0x%02x", (bowling_ball_animation_state >> 4))
+			str += stringformat("0x%02x", (super_ball_animation_state >> 4))
 			return str
 		}
 		else
@@ -110,6 +118,7 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		SpriteHandle spr = Renderer.addSpriteHandle("mighty_signpost", px, py, renderQueue)
 		spr.setFlipX(objA0.render_flags & render_flag.FLIP_X)
 		spr.setPriorityFlag(objA0.sprite_attributes & sprite_attribute.PRIORITY)
+		spr.setPaletteOffset(0x80)
 		return true
 	}
 	// Don't modify this condition.
