@@ -1,0 +1,290 @@
+constant u8 VDP_BURST_OBJ_SIZE = 8
+constant u16 LIST_SIZE = 400 //50 * VDP_BURST_OBJ_SIZE
+constant u8 MAX_BURST_TIME = 120
+global u32 tagged_objects[400]
+global u16 explode_timer
+
+function void clearTaggedObjects()
+{
+	for (u8 i = 0; i < LIST_SIZE; i += 1)
+	{
+		tagged_objects[i] = 0
+	}
+}
+
+function void tagObjectForVdpBurst(u32 obj_address, u8 burst_type)
+{
+	for (u8 i = 0; i < LIST_SIZE; i += VDP_BURST_OBJ_SIZE)
+	{
+		if (tagged_objects[i] != 0)
+			continue
+		
+		if (u32[obj_address + 0xc] == 0 || u32[obj_address + 0xc] >= 0x400000)
+			break
+
+		tagged_objects[i] = tableLookupAddress(u32[obj_address + 0x0c], u16(u8[obj_address + 0x22]) * 2)
+
+		tagged_objects[i+1] = u16[obj_address + 0x14] // position.y.u16
+		tagged_objects[i+1] <<= 16
+		tagged_objects[i+1] |= u16[obj_address + 0x10] // position.x.u16
+
+		tagged_objects[i+2] = u16[obj_address + 0x0a] // sprite_attributes
+		tagged_objects[i+2] <<= 16
+		tagged_objects[i+2] |= 0xa000 + u16[obj_address + 0x8] // render_queue
+
+		tagged_objects[i+3] = u8[obj_address + 0x7] // box_size.x
+		tagged_objects[i+3] << 8
+		tagged_objects[i+3] |= u8[obj_address + 0x6] // box_size.y
+		tagged_objects[i+3] <<= 8
+		tagged_objects[i+3] |= u8[obj_address + 0x4] // render_flags
+
+		u64 sprite_dimensions = getSpriteDimensions(obj_address)
+		tagged_objects[i+4] = sprite_dimensions & 0xffffffff
+		
+		tagged_objects[i+5] = sprite_dimensions >> 32
+
+		tagged_objects[i+6] = burst_type
+		break
+	}
+}
+
+function void RenderSprites()
+{
+	if (Input.getController(0) & ~Input.getControllerPrevious(0) & CONTROL_X)
+	{
+		thanosSnap()
+		playSound(SFX_COLLAPSE)
+	}
+	base.RenderSprites()
+
+	for (u8 i = 0; i < LIST_SIZE; i += VDP_BURST_OBJ_SIZE)
+	{
+		if (tagged_objects[i] == 0)
+			break
+		
+		DrawObjectAsVdpSquares(i)
+		tagged_objects[i+VDP_BURST_OBJ_SIZE-1] += 1
+		if (tagged_objects[i+VDP_BURST_OBJ_SIZE-1] >= MAX_BURST_TIME)
+		{
+			for (u8 j = 0; j < VDP_BURST_OBJ_SIZE; j += 1)
+				tagged_objects[i + j] = 0
+		}
+	}
+}
+
+function void DrawObjectAsVdpSquares(u8 tag_index)
+{
+    u32 sprite_map = tagged_objects[tag_index]
+    u16 sprite_count = u16[sprite_map]
+    sprite_map += 2
+    if (sprite_count < 0 || sprite_count > 0x20)
+		return
+
+	u16 xpos = tagged_objects[tag_index+1] & 0xffff
+	u16 ypos = tagged_objects[tag_index+1] >> 16
+
+	u16 render_queue = tagged_objects[tag_index+2] & 0xffff
+	u16 sprite_attributes = tagged_objects[tag_index+2] >> 16
+
+	u8 render_flags = tagged_objects[tag_index+3] & 0xff
+	u8 box_size.y = (tagged_objects[tag_index+3] >> 8) & 0xff
+	u8 box_size.x = tagged_objects[tag_index+3] >> 16
+
+	u64 sprite_dimensions = u64(tagged_objects[tag_index+5]) << 32
+	sprite_dimensions |= u64(tagged_objects[tag_index+4])
+
+	u8 burst_type = tagged_objects[tag_index+6]
+
+	u16 burst_timer = tagged_objects[tag_index+7]
+
+
+    u8 flip_x_flag = render_flags & render_flag.FLIP_X
+    u8 flip_y_flag = render_flags & render_flag.FLIP_Y
+    u16 baseX = xpos - camera.foreground.x.u16
+	u16 baseY = ((ypos + box_size.y - camera.foreground.y.u16) & level.height.bitmask) - box_size.y
+
+    for (u8 i = 0; i < sprite_count; i += 1)
+    {
+		u8 size = u8[sprite_map+1]
+		u8 width = ((size / 4 + 1) * 8)
+		u8 height = ((size % 4 + 1) * 8)
+
+        s16 px = 0
+		if (flip_x_flag)
+			px -= s16[sprite_map+4] + width
+		else
+			px += u16[sprite_map+4]
+
+		s16 py = 0
+		if (flip_y_flag)
+			py -= s8[sprite_map] + height
+		else
+			py += s8[sprite_map]
+        
+        u16 index = u16[sprite_map+2] + sprite_attributes
+        index ^= flip_x_flag
+        index ^= flip_y_flag
+		for (u8 j = 0; j < (width >> 3); j += 1)
+        {
+            for (u8 k = 0; k < (height >> 3); k += 1)
+            {
+				s16 x_offset = (index & sprite_attribute.FLIP_X) ? (((width >> 3) - 1) - j) * 8 : j * 8
+				s16 y_offset = (index & sprite_attribute.FLIP_Y) ? (((height >> 3) - 1) - k) * 8 : k * 8
+				s16 burst_offset.x = px + x_offset
+				s16 burst_offset.y = py + y_offset
+
+				u32 burst_result = applyBurstPattern(burst_offset.x, burst_offset.y, sprite_dimensions, burst_timer, burst_type)
+				burst_offset.x = burst_result & 0xffff
+				burst_offset.y = burst_result >> 16
+
+                Renderer.drawVdpSprite(baseX + px + x_offset + burst_offset.x, baseY + py + y_offset + burst_offset.y, 0, index + k + (height >> 3) * j, render_queue)
+            }
+        }
+        sprite_map += 6
+    }
+}
+
+function u64 getSpriteDimensions(u32 obj_address)
+{
+	u32 a0_temp = A0
+	A0 = obj_address
+
+	s32 center.x = 0
+	s32 center.y = 0
+	s8 left_edge = 127
+	s8 right_edge = -128
+	s8 top_edge = -128
+	s8 bottom_edge = 127
+
+    u32 sprite_map = tableLookupAddress(objA0.mapping_offset, u16(objA0.animation.sprite) * 2)
+    u16 sprite_count = u16[sprite_map]
+	if (sprite_count == 0 || sprite_count > 0x20)
+		return 0
+	
+    sprite_map += 2
+
+    u8 flip_x_flag = objA0.render_flags & render_flag.FLIP_X
+    u8 flip_y_flag = objA0.render_flags & render_flag.FLIP_Y
+	u8 vdp_count = 0
+    for (u8 i = 0; i < sprite_count; i += 1)
+    {
+		u8 size = u8[sprite_map+1]
+		u8 width = ((size / 4 + 1) * 8)
+		u8 height = ((size % 4 + 1) * 8)
+
+		s16 px = 0
+		if (flip_x_flag)
+			px -= s16[sprite_map+4] + width
+		else
+			px += u16[sprite_map+4]
+
+		s16 py = 0
+		if (flip_y_flag)
+			py -= s8[sprite_map] + height
+		else
+			py += s8[sprite_map]
+        
+		u16 index = u16[sprite_map+2] + objA0.sprite_attributes
+        index ^= flip_x_flag
+        index ^= flip_y_flag
+        for (u8 j = 0; j < (width >> 3); j += 1)
+        {
+            for (u8 k = 0; k < (height >> 3); k += 1)
+            {
+				s8 x_offset = (index & sprite_attribute.FLIP_X) ? (((width >> 3) - 1) - j) * 8 : j * 8
+				s8 y_offset = (index & sprite_attribute.FLIP_Y) ? (((height >> 3) - 1) - k) * 8 : k * 8
+				left_edge = min(left_edge, px + x_offset)
+				right_edge = max(right_edge, px + x_offset)
+				top_edge = min(top_edge, py + y_offset)
+				top_edge = max(bottom_edge, py + y_offset)
+				center.x += px + x_offset
+				center.y += py + y_offset
+				vdp_count += 1
+            }
+        }
+        sprite_map += 6
+    }
+	A0 = a0_temp
+	//debugLog(left_edge)
+	center.x /= vdp_count
+	center.y /= vdp_count
+	center.x += 4
+	center.y += 4
+	u64 result = u16(center.y)
+	result <<= 16
+	result |= u16(center.x)
+	result <<= 8
+	result |= u8(bottom_edge)
+	result <<= 8
+	result |= u8(top_edge)
+	result <<= 8
+	result |= u8(right_edge)
+	result <<= 8
+	result |= u8(left_edge)
+	return result
+}
+
+function u32 applyBurstPattern(s16 x_offset, s16 y_offset, u64 sprite_dimensions, u16 burst_timer, u8 burst_type)
+{
+	s8 left_edge = s8(sprite_dimensions & 0xff)
+	sprite_dimensions >>= 8
+	s8 right_edge = s8(sprite_dimensions & 0xff)
+	sprite_dimensions >>= 8
+	s8 top_edge = s8(sprite_dimensions & 0xff)
+	sprite_dimensions >>= 8
+	s8 bottom_edge = s8(sprite_dimensions & 0xff)
+	sprite_dimensions >>= 8
+	s16 sprite_center.x = s16(sprite_dimensions & 0xffff)
+	sprite_dimensions >>= 16
+	s16 sprite_center.y = s16(sprite_dimensions & 0xffff)
+
+	if (burst_type == 0)
+		return simpleBurstPattern(x_offset, y_offset, sprite_center.x, sprite_center.y, burst_timer)
+	else if (burst_type == 1)
+		return horizontalBurstPattern(x_offset, y_offset, sprite_center.y, left_edge, right_edge, burst_timer, true)
+	else if (burst_type == 2)
+		return horizontalBurstPattern(x_offset, y_offset, sprite_center.y, left_edge, right_edge, burst_timer, false)
+	
+	return 0
+}
+
+function u32 simpleBurstPattern(s16 x_offset, s16 y_offset, s16 sprite_center.x, s16 sprite_center.y, u16 burst_timer)
+{
+	x_offset = s16((s32(x_offset - sprite_center.x) * burst_timer) >> 3)
+	y_offset = s16((s32(y_offset - sprite_center.y) * burst_timer) >> 3)
+	y_offset += (burst_timer * burst_timer + burst_timer * 2) >> 3
+
+	u32 result = (u32(y_offset) << 16) | u16(x_offset)
+	return result
+}
+
+function u32 horizontalBurstPattern(s16 x_offset, s16 y_offset, s16 sprite_center.y, s8 left_edge, s8 right_edge, u16 burst_timer, bool left)
+{
+	u8 dist = max(right_edge - left_edge, 1)
+
+	u16 mul = (left) ? max(right_edge - x_offset, 1) : max(x_offset - left_edge, 1)
+	mul *= burst_timer
+	mul = min(mul, 300 + (mul >> 1))
+	s32 x = (left) ? x_offset - right_edge - 8 : x_offset - left_edge + 8
+	x_offset = s16((x * burst_timer) >> 2)
+	y_offset = s16((s32(y_offset - sprite_center.y) * mul) / (dist * 8))
+	y_offset += (burst_timer * burst_timer + burst_timer * 7) >> 3
+
+	u32 result = (u32(y_offset) << 16) | u16(x_offset)
+	return result
+}
+
+function void thanosSnap()
+{
+	u32 a0_temp = A0
+	for (u32 i = 0xffffb128; i < 0xffffcb2c; i += 0x4a)
+	{
+		if (u32[i] == 0)
+			continue
+		
+		tagObjectForVdpBurst(i, 1)
+		A0 = i
+		UnloadObject()
+	}
+	A0 = a0_temp
+}
