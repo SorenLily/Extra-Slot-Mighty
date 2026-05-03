@@ -38,6 +38,14 @@ function string getCharacterResultsNameplate(u8 character)
 	return base.getCharacterResultsNameplate(character)
 }
 
+function u64 Monitor.getIconSpriteKey(u8 type)
+{
+	if (is_ES && isMainCharacter(CHARACTER_KNUCKLES) && type == 0x1)
+		return "monitor_icon_mighty"
+
+	return base.Monitor.getIconSpriteKey(type)
+}
+
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
 	if (is_ES && character == CHARACTER_BASE)
@@ -85,7 +93,13 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			return str
 		}
 		else
-			return stringformat("character_mighty_0x%02x", getCharSpriteIndex())
+		{
+			u8 sprite_index = getCharSpriteIndex()
+			if (sprite_index == 0)
+				return "act_select_character_sprite_override"
+			else
+				return stringformat("character_mighty_0x%02x", sprite_index)
+		}
 	}
 	return base.Standalone.getModdedAnimationSpriteKey(character, animationSpriteEx)
 }
@@ -134,8 +148,54 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 
 	if (A0 == 0xffffb000 && is_ES)
 	{
-		if (char.spindash == 0x80)
-			py += 0x4
+		if (char.spindash == 0x80 || super_ball_state)
+		{
+			s16 afterImagesOffsetX = 0
+			if (char.spindash == 0x80)
+			{
+				py += 0x4
+				afterImagesOffsetX = ((max(char.spindash_charge, 0x100) - 0x100) >> 6) * ((char.flags & char.flag.FACING_LEFT) ? 1 : -1)
+			}
+			u32 posbackup_backup[4]
+			for (u8 i = 3; i > 0; i -= 1)
+			{
+				u32 address = 0xffffe500 + u8(posbackup.offset.player1 - (i * 8 + 4))
+				posbackup_backup[i] = u32[address]
+				u16[address] += (i * afterImagesOffsetX / 2)
+				if (char.spindash == 0x80)
+					u16[address + 2] += 4
+			}
+			u8 speed_up_temp = char.bonus_effect & char.bonus.SPEED_UP
+			char.bonus_effect |= char.bonus.SPEED_UP
+			bool result = base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+			char.bonus_effect &= ~char.bonus.SPEED_UP
+			char.bonus_effect |= speed_up_temp
+
+			for (u8 i = 3; i > 0; i -= 1)
+			{
+				u32 address = 0xffffe500 + u8(posbackup.offset.player1 - (i * 8 + 4))
+				u32[address] = posbackup_backup[i]
+			}
+		}
 	}
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+}
+
+global bool modify_blend
+
+function void UpdatePaletteEffects.SuperForm.moddingVersion(u8 characterVersion)
+{
+	if (is_ES && characterVersion == 0x3)
+		modify_blend = true
+	base.UpdatePaletteEffects.SuperForm.moddingVersion(characterVersion)
+	modify_blend = false
+}
+
+function u16 blendColorsPacked(u16 colorA, u16 colorB, u16 blendFactor)
+{
+	if (modify_blend)
+	{
+		
+	}
+	return base.blendColorsPacked(colorA, colorB, blendFactor)
 }

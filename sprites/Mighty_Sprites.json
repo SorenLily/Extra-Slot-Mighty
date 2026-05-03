@@ -16,7 +16,6 @@
 	"bluesphere_mighty_0x09":  { "File": "bluesphere_mighty.bmp", "Rect": "256,12,32,32", "Center": "16,38" },
 	"bluesphere_mighty_0x0a":  { "File": "bluesphere_mighty.bmp", "Rect": "288,12,32,32", "Center": "16,38" },
 	"bluesphere_mighty_0x0b":  { "File": "bluesphere_mighty.bmp", "Rect": "320,12,32,32", "Center": "16,38" },
-	"character_mighty_0x00":  { "File": "character_mighty.bmp", "Rect": "404,232,32,40", "Center": "16,20" },
 	"character_mighty_0x01":  { "File": "character_mighty.bmp", "Rect": "8,8,40,40", "Center": "20,20" },
 	"character_mighty_0x02":  { "File": "character_mighty.bmp", "Rect": "64,8,40,40", "Center": "20,19" },
 	"character_mighty_0x03":  { "File": "character_mighty.bmp", "Rect": "124,8,33,40", "Center": "20,18" },

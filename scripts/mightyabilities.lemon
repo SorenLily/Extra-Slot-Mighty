@@ -70,8 +70,8 @@ function bool isFloating()
     // - The weird orange propellers(?) in CNZ,
     // - The bottom of the stage in SSZ.
     bool result = (char.state == char.state.RUNNING && char.rotation.x != 0)
-    if (result)
-        debugLog("floating")
+    //if (result)
+    //    debugLog("floating")
     return result
 }
 
@@ -93,6 +93,7 @@ function void Character.Initialization.shared(u8 character)
     velocity.y.copy = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
+    clearTaggedObjects()
     base.Character.Initialization.shared(character)
 }
 
@@ -146,11 +147,12 @@ function void Character.BaseUpdate.Sonic()
         cling_timer = 0
     }
 
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed) < 0x800 || abs(char.velocity.x) < 0x300)
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed) < 0x800 || (((abs(char.velocity.x) + abs(char.velocity.y)) >> 1) < 0x400))
     {
         super_ball_state = 0
     }
     base.Character.BaseUpdate.Sonic()
+
     // Update custom animations.
     updateWinPose()
     updateBouncyBallAnim()
@@ -236,10 +238,10 @@ function void Character.updateJumpMoves()
     // Modify char.bonus_effect to disable all elemental shield abilities.
     // TODO: This is done here because they get checked in both SonicPressedJumpInMidAir() and onCharacterPressedJumpInMidair(),
     // but maybe it would be better to just handle this in both functions individually.
-    u8 bonus_effect_temp = char.bonus_effect
-    char.bonus_effect = 0
+    u8 bonus_effect_temp = char.bonus_effect & char.bonus.ALL_SHIELDS
+    char.bonus_effect &= ~char.bonus.ALL_SHIELDS
     base.Character.updateJumpMoves()
-    char.bonus_effect = bonus_effect_temp
+    char.bonus_effect |= bonus_effect_temp
     // Disable dropdash by keeping it's counter at 0.
     sonic.dropdash_counter = 0
     // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
@@ -381,7 +383,7 @@ function void Character.UpdateControlInAir()
             dy >>= 1
 
         // Cancel any upward y-velocity the player has, and accelerate.
-        char.velocity.y = clamp(char.velocity.y + dy, 0, 0x1000)
+        char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0x1000)
         // Add x-velocity in the appropriate direction (none if going down).
         
         char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
@@ -430,6 +432,7 @@ function void Character.LandingOnGroundResetState()
     }
 }
 
+// Helper function
 function void mightyBounce()
 {
     s16 vx = velocity.x.copy
@@ -444,7 +447,7 @@ function void mightyBounce()
     s16 force = 0
     if (hammer_drop_state)
     {
-        force = 0x600 + (max(hammer_drop_state, 8) - 8) * 0x48
+        force = 0x600 + (max(hammer_drop_state, 8) - 8) * (hammer_drop_direction ? 0x20 : 0x48)
     }
     else if (bouncy_ball_state)
     {
@@ -506,7 +509,7 @@ function void Character.CheckCollisionsWithDynamicObjects_partial()
         destroyObstacles()
     
     // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || super_ball_state))
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || super_ball_state || (char.spindash & 0x80)))
     {
         // Grant invincibility for collisions.
         u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
@@ -518,7 +521,6 @@ function void Character.CheckCollisionsWithDynamicObjects_partial()
     else
     {
         base.Character.CheckCollisionsWithDynamicObjects_partial()
-        return
     }
 }
 
@@ -692,21 +694,22 @@ function bool Character.UpdateSpindash()
 
 function bool Character.updateSuperPeelout()
 {
+    u8 spindash_temp = char.spindash
     u16 spindash_charge_temp = char.spindash_charge
     bool result = base.Character.updateSuperPeelout()
     if (isMighty() && result)
     {
-        /*
-        if (~char.animation.frame & 1)
-        {
-            rolling_animation_delay = (rolling_animation_delay + 1) % 3
-            char.animation.timer += rolling_animation_delay ? 1 : 0
-        }
-        */
-        if (char.spindash_charge < 0x800)
-            char.spindash_charge -= 0x30
+        if (spindash_temp == 0 && char.spindash != 0)
+		{
+            // Set state of dust cloud object to 0x02
+            if (char.drown_countdown >= 12)
+			    u8[A6 + 0x20] = 0x02
+		}
         
-        if (char.spindash_charge == 0x400 || (spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
+        if (char.spindash_charge > 0x80 && char.spindash_charge < 0x800)
+            char.spindash_charge -= 0x2c
+        
+        if ((spindash_charge_temp < 0x400 && char.spindash_charge >= 0x400) || (spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
             Audio.playAudio("peelout_charge", AudioContext.CONTEXT_SOUND)
     }
     return result
@@ -716,8 +719,7 @@ function void releaseSuperPeelout()
 {
     if (isMighty() && char.spindash_charge >= 0x800)
     {
-        char.groundspeed >>= 2
-        char.groundspeed *= 5
+        char.groundspeed += (char.groundspeed >> 3)
     }
     base.releaseSuperPeelout()
     if (isMighty())
@@ -728,6 +730,92 @@ function void releaseSuperPeelout()
     }
 }
 
+//# address-hook(0x018c20) end(0x018c82)
+function void fn018c20()
+{
+    // Dust sprite
+    if (is_ES && (u8[A2 + 0x38] == CHARACTER_BASE) && (u8[A2 + 0x3d] & 0x80))
+    {
+        u32 char_address = 0xffff0000 + objA0.dustcloud.character_address
+        u8 spindash_temp = u8[char_address + 0x3d]
+        u8[char_address + 0x3d] = 1
+        base.fn018c20()
+        u8[char_address + 0x3d] = spindash_temp
+    }
+    else
+    {
+        base.fn018c20()
+    }
+}
+
+/*
+//# address-hook(0x018c20) end(0x018c82)
+function void fn018c20()
+{
+    debugLog("A")
+	// The first check is against "sonic.drown_countdown"
+	//  -> Deactivate this while the drown countdown is shown, because the digits use the same VRAM as this effect here
+	if (u8[A2 + 0x2c] < 12 || u8[A2 + 0x05] >= base_state.HURT)
+	{
+        debugLog("B")
+		objA0.state = 0
+		return
+	}
+debugLog(u8[A2 + 0x3d])
+#if STANDALONE
+	// Check if not spindashing any more
+	if (u8[A2 + 0x3d] == 0 || u8[A2 + 0x3d] & 0x80)
+	{
+		// Play rest of animation for the drop dash...
+		//  -> Except if rolling state stopped suddenly, usually because of an interaction with the object Sonic landed on, e.g. the SSZ spinning disc
+		//  -> Unfortunately, this does not prevent the dust cloud from being visible for one frame in some cases
+		if (objA0.animation.frame == 0x07 || u8[A2 + 0x20] != char.state.ROLLING)
+		{
+            debugLog("C")
+			objA0.state = 0
+			return
+		}
+	}
+	else
+	{
+		objA0.position.x.u16 = u16[A2 + 0x10]
+		objA0.position.y.u16 = u16[A2 + 0x14]
+		objA0.flags2a = u8[A2 + 0x2a] & char.flag.FACING_LEFT
+	}
+#else
+	// Check if not spindashing any more
+	if (u8[A2 + 0x3d] == 0)
+	{
+		objA0.state = 0
+		return
+	}
+
+	objA0.position.x.u16 = u16[A2 + 0x10]
+	objA0.position.y.u16 = u16[A2 + 0x14]
+	objA0.flags2a = u8[A2 + 0x2a] & char.flag.FACING_LEFT
+#endif
+
+	D1 = 4
+	if (global.inv_gravity)
+	{
+		objA0.flags2a |= 0x02
+		D1.s16 = -D1.s16
+	}
+	if (objA0.flags38 != 0)
+	{
+		objA0.position.y.u16 -= D1.u16
+	}
+
+	if (objA0.state.former == 0)
+	{
+		if (u16[A2 + 0x0a] & sprite_attribute.PRIORITY)
+			objA0.sprite_attributes |= sprite_attribute.PRIORITY
+		else
+			objA0.sprite_attributes &= ~sprite_attribute.PRIORITY
+	}
+	fn018c94()
+}
+*/
 function void Character.updateUprightOnGroundInner()
 {
     base.Character.updateUprightOnGroundInner()
@@ -753,6 +841,19 @@ function void updateCharacterRollingOnGround()
     // Activate super ball state while rolling very quickly.
     if (abs(char.groundspeed) >= 0xe00)
         super_ball_state = 1
+}
+
+
+//# address-hook(0x011dee) end(0x011e28)
+function void Character.UpdateRollingSlopeEffect()
+{
+    s16 groundspeed_temp = char.groundspeed
+    base.Character.UpdateRollingSlopeEffect()
+    if (super_ball_state)
+    {
+        s16 diff = char.groundspeed - groundspeed_temp
+        char.groundspeed -= (diff * 3) >> 2
+    }
 }
 */
 
@@ -937,7 +1038,7 @@ function void Character.HurtCheckForStateChange()
 }
 
 //////////////////////////
-///      WIN POSE      ///
+///     ANIMATIONS     ///
 //////////////////////////
 
 // Helper function
@@ -962,6 +1063,7 @@ function void updateWinPose()
 	}
 }
 
+// Helper function
 function void updateBouncyBallAnim()
 {
     if (bouncy_ball_state)
@@ -976,6 +1078,7 @@ function void updateBouncyBallAnim()
         bouncy_ball_frame -= 12
 }
 
+// Helper function
 function void updateSuperBallAnim()
 {
     if (char.spindash == 0x80)
@@ -988,4 +1091,21 @@ function void updateSuperBallAnim()
         super_ball_animation_state += 0xc
 
     super_ball_animation_state &= 0x3f
+}
+
+//# address-hook(0x012600) end(0x01286c)
+//# translated(0x012a2a) end(0x012a6e)
+function void UpdateSonicAnimation()
+{
+    if (isMighty() && super.palettefx.state == 0xff)
+    {
+        u8 super_temp = super.active
+        super.active = 0
+        base.UpdateSonicAnimation()
+        super.active = super_temp
+    }
+    else
+    {
+        base.UpdateSonicAnimation()
+    }
 }
