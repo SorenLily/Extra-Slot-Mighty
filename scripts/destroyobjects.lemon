@@ -1,11 +1,37 @@
+////////////////////////////////////
+/// OBJECT DESTRUCTION FRAMEWORK ///
+////////////////////////////////////
+
+// This is a framework that allows drawing any sprite by their individual 8x8 pixel components
+// which allows you to manipulate those components and, for example, move them around.
+// Importantly, this is done *without* creating a new object for each component, which is what
+// Sonic 3 normally does when, for example, you break a wall and it sprays out as a bunch of squares.
+// That restriction shapes a lot of the design of this framework.
+
+// Note: I will refer to the "sprite map" of a sprite throughout this documentation. Idk if this
+// construct has an actual name, but the sprite map is a pointer into a table containing all the
+// data that the game normally uses to draw a sprite, including position offsets, "indices," and
+// chunk count and sizes.
+
+// The size of each entry in the list.
 constant u8 VDP_BURST_OBJ_SIZE = 8
+
 constant u16 LIST_SIZE = 400 //50 * VDP_BURST_OBJ_SIZE
+// Max animation time
 constant u8 MAX_BURST_TIME = 120
+
+// Burst patterns
+constant u8 BURST_TYPE_SIMPLE = 0
+constant u8 BURST_TYPE_LEFT = 1
+constant u8 BURST_TYPE_RIGHT = 2
+
+// A list containing the data necessary to draw sprites as individual squares.
+// Each entry uses several slots in the list; see tagObjectForVdpBurst() for details.
 global u32 tagged_objects[400]
-global u16 explode_timer
 
 function void clearTaggedObjects()
 {
+	// Clear the list.
 	for (u8 i = 0; i < LIST_SIZE; i += 1)
 	{
 		tagged_objects[i] = 0
@@ -14,14 +40,24 @@ function void clearTaggedObjects()
 
 function void tagObjectForVdpBurst(u32 obj_address, u8 burst_type)
 {
+	// This function registers a sprite in the list. The arguments are the address
+	// of the object whose sprite should be drawn, and the burst pattern.
+	// Once this has run, the associated object can be safely destroyed.
+	// All registered sprites are automatically drawn and progress their burst
+	// animations every frame.
 	for (u8 i = 0; i < LIST_SIZE; i += VDP_BURST_OBJ_SIZE)
 	{
+		// Find the first empty slot in the list.
 		if (tagged_objects[i] != 0)
 			continue
 		
+		// A small amount of protection against bad inputs.
 		if (u32[obj_address + 0xc] == 0 || u32[obj_address + 0xc] >= 0x400000)
 			break
 
+		// Pack all the required data of the object into the list.
+
+		// This value is the sprite map of the sprite.
 		tagged_objects[i] = tableLookupAddress(u32[obj_address + 0x0c], u16(u8[obj_address + 0x22]) * 2)
 
 		tagged_objects[i+1] = u16[obj_address + 0x14] // position.y.u16
@@ -38,12 +74,16 @@ function void tagObjectForVdpBurst(u32 obj_address, u8 burst_type)
 		tagged_objects[i+3] <<= 8
 		tagged_objects[i+3] |= u8[obj_address + 0x4] // render_flags
 
+		// This function returns the x/y center of the sprite, and the 4 borders.
 		u64 sprite_dimensions = getSpriteDimensions(obj_address)
-		tagged_objects[i+4] = sprite_dimensions & 0xffffffff
+		tagged_objects[i+4] = sprite_dimensions & 0xffffffff // bitpacked sprite center position
 		
-		tagged_objects[i+5] = sprite_dimensions >> 32
+		tagged_objects[i+5] = sprite_dimensions >> 32 // bitpacked sprite borders
 
 		tagged_objects[i+6] = burst_type
+
+		// tagged_objects[i+7] stores the animation timer for the burst.
+		// It's empty for now but increments every frame.
 		break
 	}
 }
@@ -51,20 +91,26 @@ function void tagObjectForVdpBurst(u32 obj_address, u8 burst_type)
 function void RenderSprites()
 {
 	base.RenderSprites()
+	// Draw the custom sprite bursts.
 	updateVdpBursts()
 }
 
 function void updateVdpBursts()
 {
+	// Iterate over all registered sprites.
 	for (u8 i = 0; i < LIST_SIZE; i += VDP_BURST_OBJ_SIZE)
 	{
+		// Skip empty entries.
 		if (tagged_objects[i] == 0)
-			break
+			continue
 		
 		DrawObjectAsVdpSquares(i)
+		// Increment the timer field for the entry.
 		tagged_objects[i+VDP_BURST_OBJ_SIZE-1] += 1
+		// After the animation has progressed for a while...
 		if (tagged_objects[i+VDP_BURST_OBJ_SIZE-1] >= MAX_BURST_TIME)
 		{
+			// Clear the entry.
 			for (u8 j = 0; j < VDP_BURST_OBJ_SIZE; j += 1)
 				tagged_objects[i + j] = 0
 		}
@@ -73,12 +119,42 @@ function void updateVdpBursts()
 
 function void DrawObjectAsVdpSquares(u8 tag_index)
 {
+	// tag_index is the index into our custom list of sprite data.
+	//
+	// The only way to draw an arbitrary base-game sprite is Renderer.drawVdpSprite().
+	// So in order to pull this off, I basically need to re-create the functionality of 
+	// renderNextObject() and writeToSpriteTable() so that I can feed the correct
+	// arguments to Renderer.drawVdpSprite().
+	//
+	// The arguments are: (s16 px, s16 py, u8 size, u16 index, u16 renderQueue)
+	//
+	// - renderQueue is easy and is derived from the object's sprite_priority field.
+	//
+	// - px and py are the screen-positions of the sprite component. This is straightforward
+	//   to get and modify from the sprite map.
+    //
+	// - size represents how many 8x8 component squares must be drawn for this chunk of
+	//   the sprite. This appears to be a bitpacked value where the lower 2 bits represent
+	//   the height and the next 2 bits represent the width. Both values are subtracted by 1,
+	//   so 0 is a 1x1 chunk, 0b0101 = 5 is a 2x2 chunk, and so on.
+	//
+	// - index represents which location in VRAM to draw, as well as bit-flags for x and y
+	//   reflection, and which palette line to use. I mostly only care about the VRAM
+	//   location. All of the 8x8 squares of the chunk are arranged sequentially, so when
+	//   drawing a 2x2 chunk, the indices used will be (for example) 0x490, 0x491, 0x492, 0x493.
+	//   The squares are drawn in column-major order, and if the FLIP_X or FLIP_Y flags are set
+	//   in the index, then the positional arrangement of the squares in that direction is reversed.
+
+	// Pointer to all the data that defines the layout of the sprite.
     u32 sprite_map = tagged_objects[tag_index]
+	// The number of chunks that make up the sprite.
     u16 sprite_count = u16[sprite_map]
     sprite_map += 2
-    if (sprite_count < 0 || sprite_count > 0x20)
+	// If this number is too large, the data is probably corrupted and can cause crashes.
+    if (sprite_count > 0x20)
 		return
 
+	// Unpack all the object data stored in the list.
 	u16 xpos = tagged_objects[tag_index+1] & 0xffff
 	u16 ypos = tagged_objects[tag_index+1] >> 16
 
@@ -86,9 +162,11 @@ function void DrawObjectAsVdpSquares(u8 tag_index)
 	u16 sprite_attributes = tagged_objects[tag_index+2] >> 16
 
 	u8 render_flags = tagged_objects[tag_index+3] & 0xff
+	// This is currently unused.
 	u8 box_size.y = (tagged_objects[tag_index+3] >> 8) & 0xff
 	u8 box_size.x = tagged_objects[tag_index+3] >> 16
 
+	// This will be unpacked later.
 	u64 sprite_dimensions = u64(tagged_objects[tag_index+5]) << 32
 	sprite_dimensions |= u64(tagged_objects[tag_index+4])
 
@@ -96,49 +174,62 @@ function void DrawObjectAsVdpSquares(u8 tag_index)
 
 	u16 burst_timer = tagged_objects[tag_index+7]
 
-
-    u8 flip_x_flag = render_flags & render_flag.FLIP_X
-    u8 flip_y_flag = render_flags & render_flag.FLIP_Y
+    u8 flipX = render_flags & render_flag.FLIP_X
+    u8 flipY = render_flags & render_flag.FLIP_Y
     u16 baseX = xpos - camera.foreground.x.u16
 	u16 baseY = ((ypos + box_size.y - camera.foreground.y.u16) & level.height.bitmask) - box_size.y
 
+	// Iterate over each sprite chunk.
     for (u8 i = 0; i < sprite_count; i += 1)
     {
+		// The size of the sprite chunk.
 		u8 size = u8[sprite_map+1]
+		// The width and height of the sprite chunk in pixels (minimum is a single 8x8 square).
 		u8 width = ((size / 4 + 1) * 8)
 		u8 height = ((size % 4 + 1) * 8)
 
+		// Get the x/y offsets of the sprite chunk.
         s16 px = 0
-		if (flip_x_flag)
+		if (flipX)
 			px -= s16[sprite_map+4] + width
 		else
 			px += u16[sprite_map+4]
 
 		s16 py = 0
-		if (flip_y_flag)
+		if (flipY)
 			py -= s8[sprite_map] + height
 		else
 			py += s8[sprite_map]
         
+		// The flip flags on the object's sprite_attributes field will flip
+		// the sprite as a whole, but each individual chunk may or may not also
+		// have these flags set. So the two must be xor'd together.
         u16 index = u16[sprite_map+2] + sprite_attributes
-        index ^= flip_x_flag
-        index ^= flip_y_flag
+        if (flipX)
+        	index ^= sprite_attribute.FLIP_X
+		if (flipY)
+        	index ^= sprite_attribute.FLIP_Y
+		
+		// Iterate in column-major order.
 		for (u8 j = 0; j < (width >> 3); j += 1)
-        {
-            for (u8 k = 0; k < (height >> 3); k += 1)
-            {
+		{
+			for (u8 k = 0; k < (height >> 3); k += 1)
+			{
+				// Reverse the positional offsets if the flip flag is present.
 				s16 x_offset = (index & sprite_attribute.FLIP_X) ? (((width >> 3) - 1) - j) * 8 : j * 8
 				s16 y_offset = (index & sprite_attribute.FLIP_Y) ? (((height >> 3) - 1) - k) * 8 : k * 8
-				s16 burst_offset.x = px + x_offset
-				s16 burst_offset.y = py + y_offset
+				x_offset += px
+				y_offset += py
 
-				u32 burst_result = applyBurstPattern(burst_offset.x, burst_offset.y, sprite_dimensions, burst_timer, burst_type)
-				burst_offset.x = burst_result & 0xffff
-				burst_offset.y = burst_result >> 16
-
-                Renderer.drawVdpSprite(baseX + px + x_offset + burst_offset.x, baseY + py + y_offset + burst_offset.y, 0, index + k + (height >> 3) * j, render_queue)
-            }
-        }
+				// Apply extra position manipulations to produce the burst pattern.
+				u32 burst_result = applyBurstPattern(x_offset, y_offset, sprite_dimensions, burst_timer, burst_type)
+				x_offset += burst_result & 0xffff
+				y_offset += burst_result >> 16
+				// Draw a single 8x8 square.
+				Renderer.drawVdpSprite(baseX + x_offset, baseY + y_offset, 0, index + k + (height >> 3) * j, render_queue)
+			}
+		}
+		// Move to the next sprite chunk.
         sprite_map += 6
     }
 }
@@ -162,8 +253,8 @@ function u64 getSpriteDimensions(u32 obj_address)
 	
     sprite_map += 2
 
-    u8 flip_x_flag = objA0.render_flags & render_flag.FLIP_X
-    u8 flip_y_flag = objA0.render_flags & render_flag.FLIP_Y
+    u8 flipX = objA0.render_flags & render_flag.FLIP_X
+    u8 flipY = objA0.render_flags & render_flag.FLIP_Y
 	u8 vdp_count = 0
     for (u8 i = 0; i < sprite_count; i += 1)
     {
@@ -172,20 +263,23 @@ function u64 getSpriteDimensions(u32 obj_address)
 		u8 height = ((size % 4 + 1) * 8)
 
 		s16 px = 0
-		if (flip_x_flag)
+		if (flipX)
 			px -= s16[sprite_map+4] + width
 		else
 			px += u16[sprite_map+4]
 
 		s16 py = 0
-		if (flip_y_flag)
+		if (flipY)
 			py -= s8[sprite_map] + height
 		else
 			py += s8[sprite_map]
         
 		u16 index = u16[sprite_map+2] + objA0.sprite_attributes
-        index ^= flip_x_flag
-        index ^= flip_y_flag
+		if (flipX)
+        	index ^= sprite_attribute.FLIP_X
+		if (flipY)
+        	index ^= sprite_attribute.FLIP_Y
+
         for (u8 j = 0; j < (width >> 3); j += 1)
         {
             for (u8 k = 0; k < (height >> 3); k += 1)
@@ -195,7 +289,7 @@ function u64 getSpriteDimensions(u32 obj_address)
 				left_edge = min(left_edge, px + x_offset)
 				right_edge = max(right_edge, px + x_offset)
 				top_edge = min(top_edge, py + y_offset)
-				top_edge = max(bottom_edge, py + y_offset)
+				bottom_edge = max(bottom_edge, py + y_offset)
 				center.x += px + x_offset
 				center.y += py + y_offset
 				vdp_count += 1
@@ -204,7 +298,6 @@ function u64 getSpriteDimensions(u32 obj_address)
         sprite_map += 6
     }
 	A0 = a0_temp
-	//debugLog(left_edge)
 	center.x /= vdp_count
 	center.y /= vdp_count
 	center.x += 4
@@ -270,8 +363,141 @@ function u32 horizontalBurstPattern(s16 x_offset, s16 y_offset, s16 sprite_cente
 	s32 x = (left) ? x_offset - right_edge - 8 : x_offset - left_edge + 8
 	x_offset = s16((x * burst_timer) >> 2)
 	y_offset = s16((s32(y_offset - sprite_center.y) * mul) / (dist * 8))
-	y_offset += (burst_timer * burst_timer + burst_timer * 7) >> 3
+	y_offset += s16(burst_timer * burst_timer - burst_timer * 6) >> 3
 
 	u32 result = (u32(y_offset) << 16) | u16(x_offset)
 	return result
+}
+
+//////////////////////////////////
+///  Mighty Destroy Obstacles  ///
+//////////////////////////////////
+
+function void destroyObstacles()
+{
+	// This is a heavily modified version of Character.CheckCollisionsWithDynamicObjects()
+
+	// The game stores a list of objects on screen that the player can normally collide with during
+	// Character.CheckCollisionsWithDynamicObjects(). I refer to these as "interactible" objects.
+	// We're going to use this list to see if the object is interactible, but also allow for colliding
+	// with other types of objects as needed.
+	u16 num_interactibles = global.dynamic_objects.size >> 1
+	u32 interactible_index = addressof(global.dynamic_objects.size) + 2
+	
+	// Loop through all (relevant) dynamic object slots.
+	// Addresses outside this range are all reserved and would never participate in this collision logic.
+	for (u32 dynamic_address = 0xffffb128; dynamic_address <= 0xffffcae2; dynamic_address += 0x4a)
+	{
+		// Using a register isn't necessary, but it makes the syntax nicer.
+		A1 = dynamic_address
+		// If the object is empty, do nothing.
+		if (objA1.update_address == 0)
+			continue
+        
+		// Get the address of the next interactible object from the table (if there is one).
+		u32 next_interactible = 0xffff0000
+		if (num_interactibles)
+			next_interactible += u16[interactible_index]
+
+		// Is the object in the table? If so, it's an interactible.
+		bool is_interactible = (A1 == next_interactible)
+		if (is_interactible)
+		{
+			// Move to the next entry in the table of interactible objects.
+			num_interactibles -= 1
+			interactible_index += 2
+			// Interactibles with no collision attribute data can't collide.
+			if (objA1.collision_attributes == 0)
+				continue
+		}
+
+        // Only proceed with objects that we want Mighty's superball state to break.
+        if (!isBreakableObstacle(u32[A1]))
+            continue
+        
+		// Get the (unsigned) distances between the character and object.
+		u16 dx = abs(s16(objA0.position.x.u16 - objA1.position.x.u16))
+		u16 dy = abs(s16(objA0.position.y.u16 - objA1.position.y.u16))
+		u8 other_hitbox.x = 0
+		u8 other_hitbox.y = 0
+		// Figure out what the hitbox size is.
+		if (is_interactible)
+		{
+			// This is how the game normally accesses the hitbox sizes of interactibles.
+			u32 collision_size_lookup = 0x00ff62 + (objA1.collision_attributes & collision_attributes.size) * 2
+			other_hitbox.x = u8[collision_size_lookup]
+			other_hitbox.y = u8[collision_size_lookup + 1]
+		}
+		else
+		{
+			// Use the object's "box_size" variables.
+			other_hitbox.x = objA1.box_size.x
+			other_hitbox.y = objA1.box_size.y
+		}
+		// This is a slightly simpler way to check for collisions than what the game does.
+		if (dx < (objA0.hitbox_extends.x + other_hitbox.x + 4) && dy < (objA0.hitbox_extends.y + other_hitbox.y + 2))
+		{
+            u8 burst_type = 0
+            if (abs(objA0.velocity.x) >= 0x200)
+                burst_type = (objA0.velocity.x < 0) ? 1 : 2
+			tagObjectForVdpBurst(A1, burst_type)
+			// If the character is standing on this object...
+            if ((char.flags & char.flag.ON_OBJECT) && (A1 == (0xffff0000 + u32(u16[A0 + 0x42]))))
+            {
+				// Stop standing on it.
+                char.flags &= ~char.flag.ON_OBJECT
+                u16[A0 + 0x42] = 0
+            }
+            unloadObjectAt(A1)
+            playSound(SFX_COLLAPSE)
+		}
+	}
+}
+
+function bool isBreakableObstacle(u32 update_address)
+{
+    bool result = false
+    for (u8 i = 0; i < obstacle_addresses.length(); i += 1)
+    {
+        if (update_address == obstacle_addresses[i])
+        {
+            result = true
+            break
+        }
+    }
+    return result
+}
+
+constant array<u32> obstacle_addresses =
+{
+    0x24090, // Floor Spikes
+    0x240e2, // Wall Spikes
+    0x2413e,  // Ceiling Spikes
+    0x01faf2, // Rocks
+    0x04172e, // SOZ Rocks
+    0x0341bc, // MGZ Chain Spike Ball
+    0x341fa,
+    0x557c8,
+    0x3b1b2,
+    0x3b1ea,
+    0x3b18c,
+    0x3b1c4,
+    0x4397E, // LRZ Rolling Spike Ball
+    0x435E0,
+    0x43B96,
+    0x43C88,
+    0x02927c, // Spike Crusher
+    0x8B198, // Ice Spikes
+    0x8B1AE,
+    0x8B1D4,
+    0x8B1FA,
+    0x8B2DA,
+    0x8B330,
+    0x8B2A4,
+    0x8B2EE,
+    0x8B310,
+    0x856DE,
+    0x85140,
+    0x8B4EC,
+    0x8B384, // Ice Block
 }

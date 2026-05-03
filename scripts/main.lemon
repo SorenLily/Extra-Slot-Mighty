@@ -2,7 +2,7 @@
 include extraslotframework
 include rendercharacter
 include mightyabilities
-include mightybreakobstacles
+include destroyobjects
 
 constant string UNIQUE_ID = "soren_lily_mighty"
 constant string CHAR_KEY = "mighty"
@@ -15,10 +15,9 @@ function void UpdateGameObjects()
 
 function string getESChar(u8 player_index)
 {
-	if (is_ES)
+	if (is_ES && (player_index == is_partner))
 	{
-		string result = base.getESChar(player_index)
-		return (player_index ^ is_partner) ? result : UNIQUE_ID
+		return UNIQUE_ID
 	}
 	else
 	{
