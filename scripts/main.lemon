@@ -1,12 +1,13 @@
 //# script-feature-level(2)
 include extraslotframework
 include rendercharacter
-include mightyabilities
+include mighty_abilities/?
 include destroyobjects
 
 constant string UNIQUE_ID = "soren_lily_mighty"
 constant string CHAR_KEY = "mighty"
 constant u8 CHARACTER_BASE = 2
+constant u32 DEBUG_ADDRESS = 0x86b49e
 
 function void UpdateGameObjects()
 {

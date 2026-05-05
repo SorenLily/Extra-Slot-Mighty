@@ -1,9 +1,11 @@
 // 0 -> off, >= 1 -> dropping the hammer.
-global u16 hammer_drop_state
+global u8 hammer_drop_state
 // -1 -> Left, 0 -> Down, 1 -> Right
 global s8 hammer_drop_direction
 // Used for animation after bouncing from hammer drop, and as the cooldown of hammer drop.
 global u8 hammer_drop_rebound
+// A copy of x-velocity used when bouncing with the hammer drop during super-ball state.
+global s16 stored_velocity
 // 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
 global u8 bouncy_ball_state
 // 0 -> off, -1 -> clinging to left wall, 1 -> clinging to right wall.
@@ -70,8 +72,6 @@ function bool isFloating()
     // - The weird orange propellers(?) in CNZ,
     // - The bottom of the stage in SSZ.
     bool result = (char.state == char.state.RUNNING && char.rotation.x != 0)
-    //if (result)
-    //    debugLog("floating")
     return result
 }
 
@@ -147,9 +147,10 @@ function void Character.BaseUpdate.Sonic()
         cling_timer = 0
     }
 
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || abs(char.groundspeed) < 0x800 || (((abs(char.velocity.x) + abs(char.velocity.y)) >> 1) < 0x400))
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x800) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x800)))))
     {
         super_ball_state = 0
+        stored_velocity = 0
     }
     base.Character.BaseUpdate.Sonic()
 
@@ -308,15 +309,23 @@ function void SonicPressedJumpInMidAir()
     {
         // End the bouncy ball state.
         // bouncy_ball_state = 0
+
         // Start the hammer drop.
         if (!hammer_drop_rebound)
+        {
             hammer_drop_state = 1
+            stored_velocity = max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x800)
+            stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
+        }
+
         // Set the appropriate direction (it stays at 0 if we're going straight down).
+        /*
+        // SIDEWAYS HAMMER DROP DISABLED
         if (control.pad1.state & CONTROL_LEFT)
             hammer_drop_direction = -1
         else if (control.pad1.state & CONTROL_RIGHT)
             hammer_drop_direction = 1
-        
+        */
         if (!hammer_drop_direction)
             char.velocity.x >>= 1
     }
@@ -395,6 +404,24 @@ function void Character.UpdateControlInAir()
 	s16 max_vy = (char.flags & char.flag.UNDERWATER) ? -0x200 : -0x400
     if (bouncy_ball_state && !(control.player1.state & CONTROL_ABC) && char.velocity.y < max_vy)
         char.velocity.y = min(char.velocity.y + 0x80, max_vy)
+    
+    if (super_ball_state && hammer_drop_state)
+    {
+        s16 amount = clamp(char.velocity.x, -0x100, 0x100)
+        //stored_velocity.x += amount
+        char.velocity.x -= amount
+    }
+
+    if (super_ball_state && !hammer_drop_state && stored_velocity)
+    {
+        s16 amount = 0
+        if (abs(stored_velocity) > 0x800)
+            amount = stored_velocity >> 4
+        else
+            amount = clamp(stored_velocity, -0x80, 0x80)
+        stored_velocity -= amount
+        char.velocity.x += amount
+    }
 }
 
 function void Character.LandingOnGroundResetState()
@@ -447,7 +474,10 @@ function void mightyBounce()
     s16 force = 0
     if (hammer_drop_state)
     {
-        force = 0x600 + (max(hammer_drop_state, 8) - 8) * (hammer_drop_direction ? 0x20 : 0x48)
+        if (super_ball_state)
+            force = 0x800
+        else
+            force = 0x600 + (max(hammer_drop_state, 8) - 8) * (hammer_drop_direction ? 0x20 : 0x48)
     }
     else if (bouncy_ball_state)
     {
@@ -475,9 +505,9 @@ function void mightyBounce()
     char.jumping = 1
     char.on_convex_surface = 0
 
-    if (hammer_drop_state)
+    if (hammer_drop_state && super_ball_state)
     {
-        bouncy_ball_state = 2
+        // bouncy_ball_state = 2
     }
     else if (bouncy_ball_state)
     {
@@ -567,7 +597,17 @@ function void Character.CheckCollision()
         }
         // No need to do any kind of position adjustments. The base function will handle that for us.
     }
+    s16 velocity_temp.x = char.velocity.x
+    s16 velocity_temp.y = char.velocity.y
     base.Character.CheckCollision()
+    if (super_ball_state)
+    {
+        if (char.velocity.x == 0 && velocity_temp.x != 0)
+        {
+            velocity_temp.x -= (velocity_temp.x < 0) ? -0x100 : 0x100
+            char.velocity.x = velocity_temp.x
+        }
+    }
     // If we are clinging to a wall...
     if (wall_cling == 1 || wall_cling == -1)
     {
@@ -674,8 +714,17 @@ function void jumpOffWall()
     playSound(SFX_JUMP)
 }
 
+function void updateCharacterRollingOnGround()
+{
+    if (isMighty())
+        stored_velocity = 0
+    
+    base.updateCharacterRollingOnGround()
+}
+
 global u8 rolling_animation_delay
-global u8 super_ball_state
+//global u8 super_ball_state
+define super_ball_state = u8[DEBUG_ADDRESS]
 global u8 super_ball_animation_state
 
 //# translated(0x011bde) end(0x011cf0)
@@ -748,74 +797,6 @@ function void fn018c20()
     }
 }
 
-/*
-//# address-hook(0x018c20) end(0x018c82)
-function void fn018c20()
-{
-    debugLog("A")
-	// The first check is against "sonic.drown_countdown"
-	//  -> Deactivate this while the drown countdown is shown, because the digits use the same VRAM as this effect here
-	if (u8[A2 + 0x2c] < 12 || u8[A2 + 0x05] >= base_state.HURT)
-	{
-        debugLog("B")
-		objA0.state = 0
-		return
-	}
-debugLog(u8[A2 + 0x3d])
-#if STANDALONE
-	// Check if not spindashing any more
-	if (u8[A2 + 0x3d] == 0 || u8[A2 + 0x3d] & 0x80)
-	{
-		// Play rest of animation for the drop dash...
-		//  -> Except if rolling state stopped suddenly, usually because of an interaction with the object Sonic landed on, e.g. the SSZ spinning disc
-		//  -> Unfortunately, this does not prevent the dust cloud from being visible for one frame in some cases
-		if (objA0.animation.frame == 0x07 || u8[A2 + 0x20] != char.state.ROLLING)
-		{
-            debugLog("C")
-			objA0.state = 0
-			return
-		}
-	}
-	else
-	{
-		objA0.position.x.u16 = u16[A2 + 0x10]
-		objA0.position.y.u16 = u16[A2 + 0x14]
-		objA0.flags2a = u8[A2 + 0x2a] & char.flag.FACING_LEFT
-	}
-#else
-	// Check if not spindashing any more
-	if (u8[A2 + 0x3d] == 0)
-	{
-		objA0.state = 0
-		return
-	}
-
-	objA0.position.x.u16 = u16[A2 + 0x10]
-	objA0.position.y.u16 = u16[A2 + 0x14]
-	objA0.flags2a = u8[A2 + 0x2a] & char.flag.FACING_LEFT
-#endif
-
-	D1 = 4
-	if (global.inv_gravity)
-	{
-		objA0.flags2a |= 0x02
-		D1.s16 = -D1.s16
-	}
-	if (objA0.flags38 != 0)
-	{
-		objA0.position.y.u16 -= D1.u16
-	}
-
-	if (objA0.state.former == 0)
-	{
-		if (u16[A2 + 0x0a] & sprite_attribute.PRIORITY)
-			objA0.sprite_attributes |= sprite_attribute.PRIORITY
-		else
-			objA0.sprite_attributes &= ~sprite_attribute.PRIORITY
-	}
-	fn018c94()
-}
-*/
 function void Character.updateUprightOnGroundInner()
 {
     base.Character.updateUprightOnGroundInner()
@@ -834,29 +815,6 @@ function void Character.updateUprightOnGroundInner()
     }
 }
 
-/*
-function void updateCharacterRollingOnGround()
-{
-    base.updateCharacterRollingOnGround()
-    // Activate super ball state while rolling very quickly.
-    if (abs(char.groundspeed) >= 0xe00)
-        super_ball_state = 1
-}
-
-
-//# address-hook(0x011dee) end(0x011e28)
-function void Character.UpdateRollingSlopeEffect()
-{
-    s16 groundspeed_temp = char.groundspeed
-    base.Character.UpdateRollingSlopeEffect()
-    if (super_ball_state)
-    {
-        s16 diff = char.groundspeed - groundspeed_temp
-        char.groundspeed -= (diff * 3) >> 2
-    }
-}
-*/
-
 function void fn00730c()
 {
     // Super ball state ignores sand slides in SOZ.
@@ -871,170 +829,6 @@ function void fn00730c()
     {
         base.fn00730c()
     }   
-}
-
-//////////////////////////
-///       SPIKES       ///
-//////////////////////////
-
-// Floor, Ceiling, and Wall spikes all have different update functions, so we need 3 hooks to account for them.
-
-//# address-hook(0x024090) end(0x0240dc)
-function void Spikes.Update()
-{
-    // Floor spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
-
-    base.Spikes.Update()
-
-    if (block_spikes == 1)
-        block_spikes = 0
-}
-
-//# address-hook(0x0240e2) end(0x024138)
-function void fn0240e2()
-{
-    // Wall spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
-
-    base.fn0240e2()
-
-    if (block_spikes == 1)
-        block_spikes = 0
-}
-
-//# address-hook(0x02413e) end(0x024188)
-function void fn02413e()
-{
-    // Ceiling spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
-
-    base.fn02413e()
-    
-    if (block_spikes == 1)
-        block_spikes = 0
-}
-
-// Also, in some zones, damaging blocker elements look like spikes, even though they're not. In HCZ, there's a
-// strip of "spikes" that is actually just a damaging blocker element, and in ICZ the icicle-spikes are also
-// damaging blocker elements. And they also have 3 different update functions based on orientation, so we need
-// another 3 hooks.
-
-//# address-hook(0x01f45e) end(0x01f4c2)
-function void fn01f45e()
-{
-    // Floor hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
-    {
-        block_spikes = 1
-    }
-    base.fn01f45e()
-    if (block_spikes == 1)
-    {
-        block_spikes = 0
-    }
-}
-
-//# address-hook(0x01f4c4) end(0x01f526)
-function void fn01f4c4()
-{
-    // Wall hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
-    {
-        block_spikes = 1
-    }
-    base.fn01f4c4()
-    if (block_spikes == 1)
-    {
-        block_spikes = 0
-    }
-}
-
-//# address-hook(0x01f528) end(0x01f58a)
-function void fn01f528()
-{
-    // Ceiling hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
-    {
-        block_spikes = 1
-    }
-    base.fn01f528()
-    if (block_spikes == 1)
-    {
-        block_spikes = 0
-    }
-}
-
-//# address-hook(0x08b4ec) end(0x08b526)
-function void fn08b4ec()
-{
-    // ICZ ice crystals
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
-
-    base.fn08b4ec()
-
-    if (block_spikes == 1)
-        block_spikes = 0
-}
-
-//# address-hook(0x0411d8) end(0x04120a)
-//# translated(0x04121e) end(0x04126c)
-function void fn0411d8()
-{
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
-
-    base.fn0411d8()
-
-    if (block_spikes == 1)
-        block_spikes = 0
-}
-
-//# address-hook(0x010294) end(0x010364)
-function void Character.GettingHurt()
-{
-    // Now to actually prevent spike damage.
-    
-    // The checks here:
-    // - We check for isMighty() here and not in the above hooks because in the above hooks we can't
-    //   distinguish between player 1 and player 2.
-    // - block_spikes will only be equal to 1 if we collided with a spike and are in a bouncing state.
-    // - If char.protection_flag is already set, there's no need to do anything.
-    if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
-    {
-        // The protection flag blocks damage exactly as we want for mighty, so just give him that.
-        u8 protection_temp = char.protection_flag
-        char.protection_flag |= 0x80
-        base.Character.GettingHurt()
-        char.protection_flag = protection_temp
-        // There's no need to reset most of the ability states, since this will put us in the HURT base state,
-        // and that will make the hook to baseUpdate() reset everything.
-        hammer_drop_state = 0
-        bouncy_ball_state = 0
-        // Increase block_spikes so that the above hooks don't clear it and the state will linger.
-        block_spikes = 2
-    }
-    else
-    {
-        // If block_spikes == 1 but this branch was reached anyway, the above hooks will safely clear it.
-        base.Character.GettingHurt()
-    }
-}
-
-function void Character.HurtCheckForStateChange()
-{
-    base.Character.HurtCheckForStateChange()
-    // If the HURT state just ended and the damage we took was from blocked spikes...
-    if (isMighty() && char.base_state == base_state.NORMAL && block_spikes == 2)
-    {
-        // Shorten the invulnerability.
-        char.invuln.countdown = 30
-        block_spikes = 0
-    }
 }
 
 //////////////////////////

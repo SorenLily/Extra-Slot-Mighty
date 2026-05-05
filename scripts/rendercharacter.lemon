@@ -152,18 +152,25 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		{
 			s16 afterImagesOffsetX = 0
 			if (char.spindash == 0x80)
-			{
 				py += 0x4
-				afterImagesOffsetX = ((max(char.spindash_charge, 0x100) - 0x100) >> 6) * ((char.flags & char.flag.FACING_LEFT) ? 1 : -1)
-			}
+
 			u32 posbackup_backup[4]
 			for (u8 i = 3; i > 0; i -= 1)
 			{
 				u32 address = 0xffffe500 + u8(posbackup.offset.player1 - (i * 8 + 4))
 				posbackup_backup[i] = u32[address]
-				u16[address] += (i * afterImagesOffsetX / 2)
 				if (char.spindash == 0x80)
+				{
+					s16 offset = ((max(char.spindash_charge, 0x100) - 0x100) >> 6) * ((char.flags & char.flag.FACING_LEFT) ? 1 : -1)
+					u16[address] += (i * offset / 2)
 					u16[address + 2] += 4
+				}
+				else
+				{
+					u32 new_address = 0xffffe500 + u8(posbackup.offset.player1 - (i * 4 + 4))
+					u16[address] = u16[new_address]
+					u16[address+2] = u16[new_address+2]
+				}
 			}
 			u8 speed_up_temp = char.bonus_effect & char.bonus.SPEED_UP
 			char.bonus_effect |= char.bonus.SPEED_UP
@@ -176,6 +183,7 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 				u32 address = 0xffffe500 + u8(posbackup.offset.player1 - (i * 8 + 4))
 				u32[address] = posbackup_backup[i]
 			}
+			return result
 		}
 	}
 	return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)

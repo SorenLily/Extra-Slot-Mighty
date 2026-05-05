@@ -1,0 +1,159 @@
+// Floor, Ceiling, and Wall spikes all have different update functions, so we need 3 hooks to account for them.
+
+//# address-hook(0x024090) end(0x0240dc)
+function void Spikes.Update()
+{
+    // Floor spikes.
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.Spikes.Update()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
+//# address-hook(0x0240e2) end(0x024138)
+function void fn0240e2()
+{
+    // Wall spikes.
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn0240e2()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
+//# address-hook(0x02413e) end(0x024188)
+function void fn02413e()
+{
+    // Ceiling spikes.
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn02413e()
+    
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
+// Also, in some zones, damaging blocker elements look like spikes, even though they're not. In HCZ, there's a
+// strip of "spikes" that is actually just a damaging blocker element, and in ICZ the icicle-spikes are also
+// damaging blocker elements. And they also have 3 different update functions based on orientation, so we need
+// another 3 hooks.
+
+//# address-hook(0x01f45e) end(0x01f4c2)
+function void fn01f45e()
+{
+    // Floor hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f45e()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x01f4c4) end(0x01f526)
+function void fn01f4c4()
+{
+    // Wall hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f4c4()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x01f528) end(0x01f58a)
+function void fn01f528()
+{
+    // Ceiling hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    {
+        block_spikes = 1
+    }
+    base.fn01f528()
+    if (block_spikes == 1)
+    {
+        block_spikes = 0
+    }
+}
+
+//# address-hook(0x08b4ec) end(0x08b526)
+function void fn08b4ec()
+{
+    // ICZ ice crystals
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn08b4ec()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
+//# address-hook(0x0411d8) end(0x04120a)
+//# translated(0x04121e) end(0x04126c)
+function void fn0411d8()
+{
+    if (hammer_drop_state || (bouncy_ball_state >= 2))
+        block_spikes = 1
+
+    base.fn0411d8()
+
+    if (block_spikes == 1)
+        block_spikes = 0
+}
+
+//# address-hook(0x010294) end(0x010364)
+function void Character.GettingHurt()
+{
+    // Now to actually prevent spike damage.
+    
+    // The checks here:
+    // - We check for isMighty() here and not in the above hooks because in the above hooks we can't
+    //   distinguish between player 1 and player 2.
+    // - block_spikes will only be equal to 1 if we collided with a spike and are in a bouncing state.
+    // - If char.protection_flag is already set, there's no need to do anything.
+    if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
+    {
+        // The protection flag blocks damage exactly as we want for mighty, so just give him that.
+        u8 protection_temp = char.protection_flag
+        char.protection_flag |= 0x80
+        base.Character.GettingHurt()
+        char.protection_flag = protection_temp
+        // There's no need to reset most of the ability states, since this will put us in the HURT base state,
+        // and that will make the hook to baseUpdate() reset everything.
+        hammer_drop_state = 0
+        bouncy_ball_state = 0
+        // Increase block_spikes so that the above hooks don't clear it and the state will linger.
+        block_spikes = 2
+    }
+    else
+    {
+        // If block_spikes == 1 but this branch was reached anyway, the above hooks will safely clear it.
+        base.Character.GettingHurt()
+    }
+}
+
+function void Character.HurtCheckForStateChange()
+{
+    base.Character.HurtCheckForStateChange()
+    // If the HURT state just ended and the damage we took was from blocked spikes...
+    if (isMighty() && char.base_state == base_state.NORMAL && block_spikes == 2)
+    {
+        // Shorten the invulnerability.
+        char.invuln.countdown = 30
+        block_spikes = 0
+    }
+}
