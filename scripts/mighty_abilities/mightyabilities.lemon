@@ -147,7 +147,7 @@ function void Character.BaseUpdate.Sonic()
         cling_timer = 0
     }
 
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x800) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x800)))))
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
     {
         super_ball_state = 0
         stored_velocity = 0
@@ -314,7 +314,7 @@ function void SonicPressedJumpInMidAir()
         if (!hammer_drop_rebound)
         {
             hammer_drop_state = 1
-            stored_velocity = max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x800)
+            stored_velocity = max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600)
             stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
         }
 
@@ -418,7 +418,7 @@ function void Character.UpdateControlInAir()
         if (abs(stored_velocity) > 0x800)
             amount = stored_velocity >> 4
         else
-            amount = clamp(stored_velocity, -0x80, 0x80)
+            amount = clamp(stored_velocity, -0x60, 0x60)
         stored_velocity -= amount
         char.velocity.x += amount
     }
@@ -477,7 +477,7 @@ function void mightyBounce()
         if (super_ball_state)
             force = 0x800
         else
-            force = 0x600 + (max(hammer_drop_state, 8) - 8) * (hammer_drop_direction ? 0x20 : 0x48)
+            force = 0x600 + min((max(hammer_drop_state, 8) - 8), 0x18) * (hammer_drop_direction ? 0x20 : 0x48)
     }
     else if (bouncy_ball_state)
     {
@@ -604,7 +604,7 @@ function void Character.CheckCollision()
     {
         if (char.velocity.x == 0 && velocity_temp.x != 0)
         {
-            velocity_temp.x -= (velocity_temp.x < 0) ? -0x100 : 0x100
+            velocity_temp.x -= (velocity_temp.x < 0) ? -0x80 : 0x80
             char.velocity.x = velocity_temp.x
         }
     }
@@ -756,9 +756,9 @@ function bool Character.updateSuperPeelout()
 		}
         
         if (char.spindash_charge > 0x80 && char.spindash_charge < 0x800)
-            char.spindash_charge -= 0x2c
+            char.spindash_charge -= 0x12
         
-        if ((spindash_charge_temp < 0x400 && char.spindash_charge >= 0x400) || (spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
+        if (/*(spindash_charge_temp < 0x400 && char.spindash_charge >= 0x400) || */(spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
             Audio.playAudio("peelout_charge", AudioContext.CONTEXT_SOUND)
     }
     return result
@@ -768,7 +768,7 @@ function void releaseSuperPeelout()
 {
     if (isMighty() && char.spindash_charge >= 0x800)
     {
-        char.groundspeed += (char.groundspeed >> 3)
+        char.groundspeed -= (char.groundspeed >> 2)
     }
     base.releaseSuperPeelout()
     if (isMighty())
@@ -812,6 +812,18 @@ function void Character.updateUprightOnGroundInner()
             
             char.groundspeed += dv
         }
+    }
+}
+
+//# address-hook(0x011dee) end(0x011e28)
+function void Character.UpdateRollingSlopeEffect()
+{
+    s16 groundspeed_temp = char.groundspeed
+    base.Character.UpdateRollingSlopeEffect()
+    if (super_ball_state)
+    {
+        s16 diff = char.groundspeed - groundspeed_temp
+        char.groundspeed -= (diff / 3)
     }
 }
 
