@@ -106,58 +106,63 @@ function void Character.BaseUpdate.Knuckles()
     }
     else
     {
-        // Mighty is treated as Knuckles for most purposes in the game, but I prefer that Sonic
-        // be the base when working with the character's code. To achieve this, we'll just switch
-        // to being Sonic and then run Sonic's update function instead of Knuckles'.
+        // These are all cases where we do not want Mighty's abilities to work or progress:
+        // 1) If Mighty is HURT or DIED,
+        // 2) Or if Mighty is being controlled by an object instead of controlled normally,
+        // 3) Or if Mighty is not in the air (all his abilities are aerial),
+        // 4) Or if Mighty is being lifted by "fans" (see isFloating() for more details),
+        // Then...
+        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating())
+        {
+            // Reset ability states.
+            hammer_drop_state = 0
+            hammer_drop_direction = 0
+            hammer_drop_rebound = 0
+            bouncy_ball_state = 0
+            bouncy_ball_frame = 0
+            wall_cling = 0
+            cling_timer = 0
+        }
 
-        // TODO: This setup is not great for compatibility since some mods might hook the update functions
-        // of both Knuckles and Sonic, and thus get confused by this mod. See if there's a better way to do this.
-        char.character = CHARACTER_SONIC
-        global.characters = CHARS_SONIC_ALONE
-        Character.BaseUpdate.Sonic()
-        char.character = CHARACTER_KNUCKLES
-        global.characters = CHARS_KNUCKLES_ALONE
+        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
+        {
+            super_ball_state = 0
+            stored_velocity = 0
+        }
+        base.Character.BaseUpdate.Knuckles()
+
+        // Update custom animations.
+        updateWinPose()
+        updateBouncyBallAnim()
+        updateSuperBallAnim()
+        //debugLog(char.state)
+        debugLog(stored_velocity)
     }
     return
 }
 
-//# address-hook(0x010a94) end(0x010ae8)
-function void Character.BaseUpdate.Sonic()
+//# address-hook(0x017d30) end(0x017ef0)
+function void UpdateKnucklesAnimation()
 {
-    if (!isMighty())
+    if (isMighty())
     {
-        base.Character.BaseUpdate.Sonic()
-        return
+        char.character = CHARACTER_SONIC
+        UpdateSonicAnimation()
+        char.character = CHARACTER_KNUCKLES
     }
-    // These are all cases where we do not want Mighty's abilities to work or progress:
-    // 1) If Mighty is HURT or DIED,
-    // 2) Or if Mighty is being controlled by an object instead of controlled normally,
-    // 3) Or if Mighty is not in the air (all his abilities are aerial),
-    // 4) Or if Mighty is being lifted by "fans" (see isFloating() for more details),
-    // Then...
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating())
+    else
     {
-        // Reset ability states.
-        hammer_drop_state = 0
-        hammer_drop_direction = 0
-        hammer_drop_rebound = 0
-        bouncy_ball_state = 0
-        bouncy_ball_frame = 0
-        wall_cling = 0
-        cling_timer = 0
+        base.UpdateKnucklesAnimation()
     }
+}
 
-    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
-    {
-        super_ball_state = 0
-        stored_velocity = 0
-    }
-    base.Character.BaseUpdate.Sonic()
-
-    // Update custom animations.
-    updateWinPose()
-    updateBouncyBallAnim()
-    updateSuperBallAnim()
+//# address-hook(0x01810e) end(0x018162)
+function void UpdateKnucklesSpritePatterns()
+{
+    if (isMighty())
+        UpdateSonicSpritePatterns()
+    else
+        base.UpdateKnucklesSpritePatterns()
 }
 
 function void updateGameObjectLoop()
@@ -212,10 +217,7 @@ function bool Character.CheckStartJump()
     {
         s16 vx_temp = char.velocity.x
         s16 vy_temp = char.velocity.y
-        // Pretend to be Knuckles to get the lower jump height.
-        char.character = CHARACTER_KNUCKLES
         result = base.Character.CheckStartJump()
-        char.character = CHARACTER_SONIC
 
         if (result && super_ball_state)
         {
@@ -226,8 +228,6 @@ function bool Character.CheckStartJump()
     return result
 }
 
-// NOTE: we need to disable all of Sonic's jump abilities, which is handled in the next 2 hooks.
-
 function void Character.updateJumpMoves()
 {
     if (!isMighty())
@@ -236,15 +236,7 @@ function void Character.updateJumpMoves()
         return
     }
 
-    // Modify char.bonus_effect to disable all elemental shield abilities.
-    // TODO: This is done here because they get checked in both SonicPressedJumpInMidAir() and onCharacterPressedJumpInMidair(),
-    // but maybe it would be better to just handle this in both functions individually.
-    u8 bonus_effect_temp = char.bonus_effect & char.bonus.ALL_SHIELDS
-    char.bonus_effect &= ~char.bonus.ALL_SHIELDS
     base.Character.updateJumpMoves()
-    char.bonus_effect |= bonus_effect_temp
-    // Disable dropdash by keeping it's counter at 0.
-    sonic.dropdash_counter = 0
     // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
     char.double_jump_state = 0
 
@@ -283,26 +275,17 @@ function void Character.updateJumpMoves()
     }
 }
 
-function void SonicPressedJumpInMidAir()
+function void KnucklesPressedJumpInMidAir()
 {
     if (!isMighty())
     {
-        base.SonicPressedJumpInMidAir() 
+        base.KnucklesPressedJumpInMidAir() 
         return
     }
 
-    // Disable Super Sonic's air-dash.
-    u8 super_temp = super.active
-    super.active = 0
-    // Need to store and reset this value to prevent the shield object from animating.
-    // TODO: if Mighty is treated as knuckles, this object may not even exist. Should we still do this?
-    u8 shield_state_temp = u8[0xffffcce8 + 0x20]
-    // Supress any sfx during this function, i.e the instashield sound.
-    supress_sfx = true
-    base.SonicPressedJumpInMidAir()
-    supress_sfx = false
-    super.active = super_temp
-    u8[0xffffcce8 + 0x20] = shield_state_temp
+    // Literally nothing that Knuckles' jump function does can be kept for Mighty,
+    // so this hook does not call the base.
+    char.flags &= ~char.flag.CONTROL_LOCK
 
     // If holding down...
     if (control.pad1.state & CONTROL_DOWN)
@@ -314,8 +297,11 @@ function void SonicPressedJumpInMidAir()
         if (!hammer_drop_rebound)
         {
             hammer_drop_state = 1
-            stored_velocity = max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600)
-            stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
+            if (super_ball_state)
+            {
+                stored_velocity = 0x300 + (max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600) >> 1)
+                stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
+            }
         }
 
         // Set the appropriate direction (it stays at 0 if we're going straight down).
@@ -329,6 +315,8 @@ function void SonicPressedJumpInMidAir()
         if (!hammer_drop_direction)
             char.velocity.x >>= 1
     }
+ 
+    return
 }
 
 //# address-hook(0x01164e) end(0x0116dc)
@@ -407,7 +395,7 @@ function void Character.UpdateControlInAir()
     
     if (super_ball_state && hammer_drop_state)
     {
-        s16 amount = clamp(char.velocity.x, -0x100, 0x100)
+        s16 amount = clamp(char.velocity.x, -0xc0, 0xc0)
         //stored_velocity.x += amount
         char.velocity.x -= amount
     }
@@ -418,7 +406,7 @@ function void Character.UpdateControlInAir()
         if (abs(stored_velocity) > 0x800)
             amount = stored_velocity >> 4
         else
-            amount = clamp(stored_velocity, -0x60, 0x60)
+            amount = clamp(stored_velocity, -0x80, 0x80)
         stored_velocity -= amount
         char.velocity.x += amount
     }
@@ -475,9 +463,9 @@ function void mightyBounce()
     if (hammer_drop_state)
     {
         if (super_ball_state)
-            force = 0x800
+            force = 0x780
         else
-            force = 0x600 + min((max(hammer_drop_state, 8) - 8), 0x18) * (hammer_drop_direction ? 0x20 : 0x48)
+            force = 0x500 + min((max(hammer_drop_state, 8) - 8), 0xc) * (hammer_drop_direction ? 0x20 : 0x68)
     }
     else if (bouncy_ball_state)
     {
@@ -514,6 +502,13 @@ function void mightyBounce()
         bouncy_ball_state += 1
         if (bouncy_ball_state == BOUNCY_BALL_MAX)
             bouncy_ball_state = 0
+    }
+
+    if (super_ball_state && hammer_drop_state)
+    {
+        u8 opposite_dir = (stored_velocity < 0) ? CONTROL_RIGHT : CONTROL_LEFT
+        if (control.player1.state & opposite_dir)
+            stored_velocity = -stored_velocity
     }
 }
 
@@ -734,7 +729,7 @@ global u8 super_ball_animation_state
 function bool Character.UpdateSpindash()
 {
     bool result = base.Character.UpdateSpindash()
-    if (!result && !Game.getSetting(SETTING_SUPER_PEELOUT) && is_ES)
+    if (!result && is_ES)
     {
         result = Character.updateSuperPeelout()
     }

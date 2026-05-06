@@ -435,7 +435,7 @@ function void destroyObstacles()
 			other_hitbox.y = objA1.box_size.y
 		}
 		// This is a slightly simpler way to check for collisions than what the game does.
-		if (dx < (objA0.hitbox_extends.x + other_hitbox.x + 4) && dy < (objA0.hitbox_extends.y + other_hitbox.y + 2))
+		if (dx < (objA0.hitbox_extends.x + other_hitbox.x + 4) && dy < (objA0.hitbox_extends.y + other_hitbox.y + 4))
 		{
             u8 burst_type = 0
             if (abs(objA0.velocity.x) >= 0x200)

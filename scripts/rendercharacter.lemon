@@ -48,7 +48,7 @@ function u64 Monitor.getIconSpriteKey(u8 type)
 
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
-	if (is_ES && character == CHARACTER_BASE)
+	if (isMighty())
 	{
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
@@ -146,7 +146,7 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 		HUD.drawSprite("hud_char_colon", px, py+32, renderQueue)
 	}
 
-	if (A0 == 0xffffb000 && is_ES)
+	if (isMighty())
 	{
 		if (char.spindash == 0x80 || super_ball_state)
 		{

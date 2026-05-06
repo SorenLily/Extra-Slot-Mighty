@@ -120,11 +120,13 @@ function void Character.GettingHurt()
 {
     // Now to actually prevent spike damage.
     
+    
     // The checks here:
     // - We check for isMighty() here and not in the above hooks because in the above hooks we can't
     //   distinguish between player 1 and player 2.
     // - block_spikes will only be equal to 1 if we collided with a spike and are in a bouncing state.
     // - If char.protection_flag is already set, there's no need to do anything.
+    /*
     if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
     {
         // The protection flag blocks damage exactly as we want for mighty, so just give him that.
@@ -138,6 +140,12 @@ function void Character.GettingHurt()
         bouncy_ball_state = 0
         // Increase block_spikes so that the above hooks don't clear it and the state will linger.
         block_spikes = 2
+    }
+    */
+    if (isMighty() && block_spikes == 1)
+    {
+        playSound(SFX_HITSPIKES)
+        return
     }
     else
     {

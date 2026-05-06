@@ -36,7 +36,7 @@ function void fn0231be()
     {
         s16 groundspeed_temp = objA1.groundspeed
         base.fn0231be()
-        objA1.groundspeed = groundspeed_temp
+        //objA1.groundspeed = groundspeed_temp
     }
     else
     {
