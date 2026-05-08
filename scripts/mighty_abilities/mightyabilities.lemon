@@ -9,6 +9,8 @@ global s8 hammer_drop_direction
 global u8 hammer_drop_rebound
 // --
 global u8 hammer_crash
+// --
+global u8 hammer_crash_lock
 // A copy of x-velocity used when bouncing with the hammer drop during super-ball state.
 global s16 stored_velocity
 // 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
@@ -149,6 +151,7 @@ function void Character.BaseUpdate.Sonic()
             super_ball_state = 0
             super_ball_cooldown = 0
             stored_velocity = 0
+            hammer_crash_lock = 0
         }
         base.Character.BaseUpdate.Sonic()
         if (super_ball_state && !(char.flags & char.flag.ROLLING))
@@ -298,7 +301,7 @@ function void SonicPressedJumpInMidAir()
     // bouncy_ball_state = 0
 
     // Start the hammer drop.
-    if (!hammer_drop_rebound)
+    if (!hammer_drop_rebound && !hammer_crash_lock)
     {
         hammer_drop_state = 1
         if (control.player1.state & CONTROL_DOWN)
@@ -468,6 +471,7 @@ function void Character.LandingOnGroundResetState()
     {
         setRollingState()
     }
+    hammer_crash_lock = 0
 }
 
 // Helper function
@@ -497,10 +501,14 @@ function void mightyBounce()
         }
         
         if (hammer_crash)
+        {
             force = 0x200
+            hammer_crash_lock = 1
+        }
         else
             force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * (hammer_drop_direction ? 0x20 : 0xc0)
 
+        
     }
     else if (bouncy_ball_state)
     {
