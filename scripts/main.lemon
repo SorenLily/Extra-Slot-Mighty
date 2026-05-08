@@ -6,7 +6,7 @@ include destroyobjects
 
 constant string UNIQUE_ID = "soren_lily_mighty"
 constant string CHAR_KEY = "mighty"
-constant u8 CHARACTER_BASE = 2
+constant u8 CHARACTER_BASE = CHARACTER_SONIC
 constant u32 DEBUG_ADDRESS = 0x86b49e
 
 function void UpdateGameObjects()

@@ -1,9 +1,14 @@
+global u8 super_ball_style
+
 // 0 -> off, >= 1 -> dropping the hammer.
 global u8 hammer_drop_state
+//define hammer_drop_state = u8[DEBUG_ADDRESS]
 // -1 -> Left, 0 -> Down, 1 -> Right
 global s8 hammer_drop_direction
 // Used for animation after bouncing from hammer drop, and as the cooldown of hammer drop.
 global u8 hammer_drop_rebound
+// --
+global u8 hammer_crash
 // A copy of x-velocity used when bouncing with the hammer drop during super-ball state.
 global s16 stored_velocity
 // 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
@@ -28,6 +33,13 @@ global u8 mighty_wp_frame
 global u8 mighty_wp_timer
 // Flag to supress sounds. Only set in one place.
 global bool supress_sfx
+// --
+global u8 super_ball_state
+// -- 
+global u8 super_ball_cooldown
+//define super_ball_state = u8[DEBUG_ADDRESS]
+global u8 super_ball_animation_state
+
 // Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
 
@@ -75,15 +87,22 @@ function bool isFloating()
     return result
 }
 
+function u16 hypot(s16 x, s16 y)
+{
+    return s16(sqrt(square(s32(x)) + square(s32(y))))
+}
+
 function void Character.Initialization.shared(u8 character)
 {
     // Reset all global state on initialization.
     hammer_drop_state = 0
     hammer_drop_direction = 0
     hammer_drop_rebound = 0
+    hammer_crash = 0
     bouncy_ball_state = 0
     bouncy_ball_frame = 0
     super_ball_state = 0
+    super_ball_cooldown = 0
     super_ball_animation_state = 0
     wall_cling = 0
     cling_timer = 0
@@ -91,18 +110,19 @@ function void Character.Initialization.shared(u8 character)
     store_bounce = 0
     velocity.x.copy = 0
     velocity.y.copy = 0
+    stored_velocity = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
     clearTaggedObjects()
     base.Character.Initialization.shared(character)
 }
 
-//# address-hook(0x016444) end(0x016498)
-function void Character.BaseUpdate.Knuckles()
+//# address-hook(0x010a94) end(0x010ae8)
+function void Character.BaseUpdate.Sonic()
 {
     if (!isMighty())
     {
-        base.Character.BaseUpdate.Knuckles()
+        base.Character.BaseUpdate.Sonic()
     }
     else
     {
@@ -124,45 +144,25 @@ function void Character.BaseUpdate.Knuckles()
             cling_timer = 0
         }
 
-        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) ||  (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300) || ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
+        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE)) //|| (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300)))) //|| ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
         {
             super_ball_state = 0
+            super_ball_cooldown = 0
             stored_velocity = 0
         }
-        base.Character.BaseUpdate.Knuckles()
+        base.Character.BaseUpdate.Sonic()
+        if (super_ball_state && !(char.flags & char.flag.ROLLING))
+            super_ball_state = 0
 
+        if (!(char.flags & char.flag.ROLLING) && abs(char.groundspeed) < 0x200)
+            super_ball_cooldown = 0
+        block_spikes = 0
         // Update custom animations.
         updateWinPose()
         updateBouncyBallAnim()
         updateSuperBallAnim()
-        //debugLog(char.state)
-        debugLog(stored_velocity)
     }
     return
-}
-
-//# address-hook(0x017d30) end(0x017ef0)
-function void UpdateKnucklesAnimation()
-{
-    if (isMighty())
-    {
-        char.character = CHARACTER_SONIC
-        UpdateSonicAnimation()
-        char.character = CHARACTER_KNUCKLES
-    }
-    else
-    {
-        base.UpdateKnucklesAnimation()
-    }
-}
-
-//# address-hook(0x01810e) end(0x018162)
-function void UpdateKnucklesSpritePatterns()
-{
-    if (isMighty())
-        UpdateSonicSpritePatterns()
-    else
-        base.UpdateKnucklesSpritePatterns()
 }
 
 function void updateGameObjectLoop()
@@ -181,7 +181,7 @@ function void updateGameObjectLoop()
     // and our checks and state will not be violated later in the frame.
 
     // If player 1 is mighty and we have triggered a bounce...
-    if (is_ES && (u32[0xffffb000] == 0x016444) && store_bounce)
+    if (is_ES && (u32[0xffffb000] == 0x010a94) && store_bounce)
     {
         // Set A0 to the player to make things simpler.
         u32 a0_temp = A0
@@ -199,10 +199,13 @@ function void updateGameObjectLoop()
         // Reset hammer drop state.
         hammer_drop_state = 0
         hammer_drop_direction = 0
+        hammer_crash = 0
         // Don't reset bouncy ball state, it's allowed to carry over between bounces.
     }
 }
 
+/*
+// DISABLED SUPER BALL JUMP HEIGHT
 //# translated(0x0117da) end(0x0118ba)
 //# translated(0x015002) end(0x0150d8)
 //# translated(0x017710) end(0x0177e8)
@@ -227,7 +230,7 @@ function bool Character.CheckStartJump()
     }
     return result
 }
-
+*/
 function void Character.updateJumpMoves()
 {
     if (!isMighty())
@@ -275,47 +278,55 @@ function void Character.updateJumpMoves()
     }
 }
 
-function void KnucklesPressedJumpInMidAir()
+function void SonicPressedJumpInMidAir()
 {
     if (!isMighty())
     {
-        base.KnucklesPressedJumpInMidAir() 
+        base.SonicPressedJumpInMidAir() 
         return
     }
 
-    // Literally nothing that Knuckles' jump function does can be kept for Mighty,
-    // so this hook does not call the base.
+    // Literally nothing that Knuckles' jump function does can be kept for Mighty
+    // except for clearing these values, so this hook does not call the base.
+    char.rotation.both = 0
     char.flags &= ~char.flag.CONTROL_LOCK
 
     // If holding down...
-    if (control.pad1.state & CONTROL_DOWN)
+    //if (control.pad1.state & CONTROL_DOWN)
+    //{
+    // End the bouncy ball state.
+    // bouncy_ball_state = 0
+
+    // Start the hammer drop.
+    if (!hammer_drop_rebound)
     {
-        // End the bouncy ball state.
-        // bouncy_ball_state = 0
+        hammer_drop_state = 1
+        if (control.player1.state & CONTROL_DOWN)
+            hammer_crash = 1
+        
 
-        // Start the hammer drop.
-        if (!hammer_drop_rebound)
-        {
-            hammer_drop_state = 1
-            if (super_ball_state)
-            {
-                stored_velocity = 0x300 + (max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600) >> 1)
-                stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
-            }
-        }
-
-        // Set the appropriate direction (it stays at 0 if we're going straight down).
         /*
-        // SIDEWAYS HAMMER DROP DISABLED
-        if (control.pad1.state & CONTROL_LEFT)
-            hammer_drop_direction = -1
-        else if (control.pad1.state & CONTROL_RIGHT)
-            hammer_drop_direction = 1
+        // SUPER BALL AIR VELOCITY DISABLED
+        if (super_ball_state)
+        {
+            stored_velocity = 0x280 + (max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600) >> 1)
+            stored_velocity = min(stored_velocity, 0x800)
+            stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
+        }
         */
-        if (!hammer_drop_direction)
-            char.velocity.x >>= 1
     }
- 
+
+    // Set the appropriate direction (it stays at 0 if we're going straight down).
+    /*
+    // SIDEWAYS HAMMER DROP DISABLED
+    if (control.pad1.state & CONTROL_LEFT)
+        hammer_drop_direction = -1
+    else if (control.pad1.state & CONTROL_RIGHT)
+        hammer_drop_direction = 1
+    */
+    if (!hammer_drop_direction)
+        char.velocity.x >>= 1
+    //}
     return
 }
 
@@ -361,6 +372,8 @@ function void Character.UpdateControlInAir()
         centerCameraYOffset()
     }
 
+    /*
+    // DISABLE SUPER BALL ANIT AIR DRAG
     if (super_ball_state)
     {
         if (char.velocity.y < 0 && char.velocity.y >= -0x400)
@@ -370,6 +383,7 @@ function void Character.UpdateControlInAir()
             char.velocity.x += dv
         }
     }
+    */
 
     if (hammer_drop_state)
     {
@@ -393,6 +407,8 @@ function void Character.UpdateControlInAir()
     if (bouncy_ball_state && !(control.player1.state & CONTROL_ABC) && char.velocity.y < max_vy)
         char.velocity.y = min(char.velocity.y + 0x80, max_vy)
     
+    /*
+    // DISABLED STORED VELOCITY
     if (super_ball_state && hammer_drop_state)
     {
         s16 amount = clamp(char.velocity.x, -0xc0, 0xc0)
@@ -410,6 +426,13 @@ function void Character.UpdateControlInAir()
         stored_velocity -= amount
         char.velocity.x += amount
     }
+    */
+
+    //if (super_ball_state && !hammer_drop_state && !stored_velocity)
+    //{
+    //    s16 dx = (char.flags & char.flag.FACING_LEFT) ? -0x40 : 0x40
+    //    char.velocity.x = clamp(char.velocity.x + dx, -0x800, 0x800)
+    //}
 }
 
 function void Character.LandingOnGroundResetState()
@@ -462,14 +485,26 @@ function void mightyBounce()
     s16 force = 0
     if (hammer_drop_state)
     {
-        if (super_ball_state)
-            force = 0x780
+        //if (super_ball_state)
+        //    force = 0x780
+        //else
+        {
+            //if (hammer_drop_state <= 0xc)
+            //    force = 0x780
+            //else if (hammer_drop_state <= 0x14)
+            //    force = 0xa80
+            
+        }
+        
+        if (hammer_crash)
+            force = 0x200
         else
-            force = 0x500 + min((max(hammer_drop_state, 8) - 8), 0xc) * (hammer_drop_direction ? 0x20 : 0x68)
+            force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * (hammer_drop_direction ? 0x20 : 0xc0)
+
     }
     else if (bouncy_ball_state)
     {
-        force = sqrt(square(s32(abs(vx))) + square(s32(abs(vy))))
+        force = hypot(vx, vy)
         force -= 0x100
         force = clamp(force, 0x400, 0xc00)
     }
@@ -599,7 +634,7 @@ function void Character.CheckCollision()
     {
         if (char.velocity.x == 0 && velocity_temp.x != 0)
         {
-            velocity_temp.x -= (velocity_temp.x < 0) ? -0x80 : 0x80
+            velocity_temp.x -= (velocity_temp.x < 0) ? -0x40 : 0x40
             char.velocity.x = velocity_temp.x
         }
     }
@@ -619,6 +654,41 @@ function void Character.CheckCollision()
         bouncy_ball_state = 0
         playSound(SFX_GRAB)
     }
+}
+
+//# address-hook(0x011350) end(0x0113f4)
+function void Character.UpdateControlOnGroundShared()
+{
+    s16 groundspeed_temp = char.groundspeed
+    base.Character.UpdateControlOnGroundShared()
+    /*
+    // DISABLE WRECKING BALL ANTI-FRICTION
+    if (isMighty() && super_ball_state)
+    {
+        if (char.groundspeed == 0 && groundspeed_temp != 0)
+        {
+            groundspeed_temp -= (groundspeed_temp < 0) ? -0x60 : 0x60
+            char.groundspeed = groundspeed_temp
+        }
+    }
+    */
+}
+
+function void updateCharacterControlOnGround()
+{
+    if (isMighty() && super_ball_state)
+    {
+        s16 dv = 0
+        if (char.groundspeed > 0 && char.groundspeed <= 0x7f0 && !(control.player1.state & CONTROL_LEFT))
+            char.groundspeed += 0x10
+        else if (char.groundspeed < 0 && char.groundspeed >= -0x7f0 && !(control.player1.state & CONTROL_RIGHT))
+            char.groundspeed -= 0x10
+        else if (char.groundspeed > 0xa00 && !(control.player1.state & CONTROL_LEFT))
+            char.groundspeed -= 0xc
+        else if (char.groundspeed < 0xa00 && !(control.player1.state & CONTROL_RIGHT))
+            char.groundspeed += 0xc
+    }
+    base.updateCharacterControlOnGround()
 }
 
 //# address-hook(0x011036) end(0x01105e)
@@ -690,6 +760,19 @@ function void Character.UpdateSonicRollingInAir()
         // Return without calling the base.
         return
     }
+
+    if (isMighty() && (super_ball_style == 1) && (control.player1.pressed & CONTROL_DOWN))
+    {
+        super_ball_state ^= 1
+    }
+    else if (isMighty() && (super_ball_style == 0) && hypot(char.velocity.x, char.velocity.y) >= 0xb00)
+    {
+        super_ball_state = 30
+    }
+    else if (isMighty() && super_ball_state && (super_ball_style == 0) && abs(char.groundspeed < 0xb00))
+    {
+        super_ball_state -= 1
+    }
     base.Character.UpdateSonicRollingInAir()
 }
 
@@ -714,13 +797,23 @@ function void updateCharacterRollingOnGround()
     if (isMighty())
         stored_velocity = 0
     
-    base.updateCharacterRollingOnGround()
-}
+    if (isMighty() && (super_ball_style == 1) && (control.player1.pressed & CONTROL_DOWN))
+    {
+        super_ball_state ^= 1
+    }
+    else if (isMighty() && (super_ball_style == 0) && abs(char.groundspeed >= 0xb00))
+    {
+        super_ball_state = 30
+    }
+    else if (isMighty() && super_ball_state && (super_ball_style == 0) && abs(char.groundspeed < 0xb00))
+    {
+        super_ball_state -= 1
+    }
 
-global u8 rolling_animation_delay
-//global u8 super_ball_state
-define super_ball_state = u8[DEBUG_ADDRESS]
-global u8 super_ball_animation_state
+    base.updateCharacterRollingOnGround()
+    if (abs(char.groundspeed) <= 0x300)
+        super_ball_state = 0
+}
 
 //# translated(0x011bde) end(0x011cf0)
 //# translated(0x011d16) end(0x011da4)
@@ -729,10 +822,11 @@ global u8 super_ball_animation_state
 function bool Character.UpdateSpindash()
 {
     bool result = base.Character.UpdateSpindash()
-    if (!result && is_ES)
-    {
-        result = Character.updateSuperPeelout()
-    }
+    // SUPER BALL FROM PEELOUT DISABLED
+    // if (isMighty() && !result)
+    // {
+    //     result = Character.updateSuperPeelout()
+    // }
     return result
 }
 
@@ -768,7 +862,7 @@ function void releaseSuperPeelout()
     base.releaseSuperPeelout()
     if (isMighty())
     {
-        super_ball_state = 1
+        //super_ball_state = 1
         super_ball_animation_state = 0
         setRollingState()
     }
@@ -815,7 +909,7 @@ function void Character.UpdateRollingSlopeEffect()
 {
     s16 groundspeed_temp = char.groundspeed
     base.Character.UpdateRollingSlopeEffect()
-    if (super_ball_state)
+    if (isMighty() && super_ball_state)
     {
         s16 diff = char.groundspeed - groundspeed_temp
         char.groundspeed -= (diff / 3)

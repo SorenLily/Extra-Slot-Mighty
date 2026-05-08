@@ -92,7 +92,10 @@ function void RenderSprites()
 {
 	base.RenderSprites()
 	// Draw the custom sprite bursts.
-	updateVdpBursts()
+	if (global.game_mode == 0x0c)
+		updateVdpBursts()
+	else
+		clearTaggedObjects()
 }
 
 function void updateVdpBursts()

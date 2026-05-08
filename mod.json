@@ -7,5 +7,22 @@
 		"Description": "Extra Slot Mighty",
 		"ModVersion": "0.8.1",
 		"GameVersion": "26.03.28.0"
+	},
+	"Settings":
+	{
+		"List":
+		[
+			{
+				"InternalName": "wreckingballactivation",
+				"DisplayName": "Wrecking Ball Activation",
+				"Variable": "super_ball_style",
+				"DefaultValue": "1",
+				"Options":
+				{
+					"0": "Always at high speed",
+					"1": "Toggle with down"
+				}
+			},
+		]
 	}
 }

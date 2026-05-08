@@ -1,10 +1,15 @@
 // Floor, Ceiling, and Wall spikes all have different update functions, so we need 3 hooks to account for them.
 
+function bool inBallState()
+{
+    return (super_ball_state || hammer_drop_state || (bouncy_ball_state >= 2))
+}
+
 //# address-hook(0x024090) end(0x0240dc)
 function void Spikes.Update()
 {
     // Floor spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
+    if (inBallState())
         block_spikes = 1
 
     base.Spikes.Update()
@@ -17,12 +22,12 @@ function void Spikes.Update()
 function void fn0240e2()
 {
     // Wall spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
-        block_spikes = 1
+    if (inBallState())
+        block_spikes = 2
 
     base.fn0240e2()
 
-    if (block_spikes == 1)
+    if (block_spikes == 2)
         block_spikes = 0
 }
 
@@ -30,7 +35,7 @@ function void fn0240e2()
 function void fn02413e()
 {
     // Ceiling spikes.
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
+    if (inBallState())
         block_spikes = 1
 
     base.fn02413e()
@@ -48,7 +53,7 @@ function void fn02413e()
 function void fn01f45e()
 {
     // Floor hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
     {
         block_spikes = 1
     }
@@ -63,12 +68,12 @@ function void fn01f45e()
 function void fn01f4c4()
 {
     // Wall hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
     {
-        block_spikes = 1
+        block_spikes = 2
     }
     base.fn01f4c4()
-    if (block_spikes == 1)
+    if (block_spikes == 2)
     {
         block_spikes = 0
     }
@@ -78,7 +83,7 @@ function void fn01f4c4()
 function void fn01f528()
 {
     // Ceiling hazard.
-    if ((global.zone == 0x01 || global.zone == 0x05) && (hammer_drop_state || (bouncy_ball_state >= 2)))
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
     {
         block_spikes = 1
     }
@@ -93,7 +98,7 @@ function void fn01f528()
 function void fn08b4ec()
 {
     // ICZ ice crystals
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
+    if (inBallState())
         block_spikes = 1
 
     base.fn08b4ec()
@@ -106,7 +111,7 @@ function void fn08b4ec()
 //# translated(0x04121e) end(0x04126c)
 function void fn0411d8()
 {
-    if (hammer_drop_state || (bouncy_ball_state >= 2))
+    if (inBallState())
         block_spikes = 1
 
     base.fn0411d8()
@@ -115,6 +120,21 @@ function void fn0411d8()
         block_spikes = 0
 }
 
+//# address-hook(0x024280) end(0x0242b4)
+function void DamageCharacter()
+{
+    if (is_ES && A1 == 0xffffb000 && block_spikes)
+    {
+        if (block_spikes == 1)
+            playSound(SFX_HITSPIKES)
+
+        return
+        block_spikes = 3
+    }
+    base.DamageCharacter()
+}
+
+/*
 //# address-hook(0x010294) end(0x010364)
 function void Character.GettingHurt()
 {
@@ -126,7 +146,6 @@ function void Character.GettingHurt()
     //   distinguish between player 1 and player 2.
     // - block_spikes will only be equal to 1 if we collided with a spike and are in a bouncing state.
     // - If char.protection_flag is already set, there's no need to do anything.
-    /*
     if (isMighty() && (block_spikes == 1) && !(char.protection_flag & 0x80))
     {
         // The protection flag blocks damage exactly as we want for mighty, so just give him that.
@@ -140,12 +159,6 @@ function void Character.GettingHurt()
         bouncy_ball_state = 0
         // Increase block_spikes so that the above hooks don't clear it and the state will linger.
         block_spikes = 2
-    }
-    */
-    if (isMighty() && block_spikes == 1)
-    {
-        playSound(SFX_HITSPIKES)
-        return
     }
     else
     {
@@ -165,3 +178,4 @@ function void Character.HurtCheckForStateChange()
         block_spikes = 0
     }
 }
+*/

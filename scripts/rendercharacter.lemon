@@ -8,7 +8,7 @@ function string getCharacterPaletteKey(u8 character)
 
 function string getCharacterBluesphereSpriteKey(u8 character)
 {
-	if (is_ES && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_BASE)
 		return "bluesphere_mighty"
 
 	return base.getCharacterBluesphereSpriteKey(character)
@@ -24,7 +24,7 @@ function string getCharacterBluespherePaletteKey(u8 character)
 
 function string getCharacterLivesIcon(u8 character)
 {
-	if (is_ES && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_BASE)
 		return "hud_lives_icon_mighty"
 	
 	return base.getCharacterLivesIcon(character)
@@ -32,7 +32,7 @@ function string getCharacterLivesIcon(u8 character)
 
 function string getCharacterResultsNameplate(u8 character)
 {
-	if (is_ES && character == CHARACTER_KNUCKLES)
+	if (is_ES && character == CHARACTER_BASE)
 		return "result_nameplate_mighty"
 	
 	return base.getCharacterResultsNameplate(character)
@@ -40,7 +40,7 @@ function string getCharacterResultsNameplate(u8 character)
 
 function u64 Monitor.getIconSpriteKey(u8 type)
 {
-	if (is_ES && isMainCharacter(CHARACTER_KNUCKLES) && type == 0x1)
+	if (is_ES && isMainCharacter(CHARACTER_BASE) && type == 0x1)
 		return "monitor_icon_mighty"
 
 	return base.Monitor.getIconSpriteKey(type)
@@ -195,6 +195,7 @@ function void UpdatePaletteEffects.SuperForm.moddingVersion(u8 characterVersion)
 {
 	if (is_ES && characterVersion == 0x3)
 		modify_blend = true
+	
 	base.UpdatePaletteEffects.SuperForm.moddingVersion(characterVersion)
 	modify_blend = false
 }
