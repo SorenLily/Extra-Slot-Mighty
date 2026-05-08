@@ -1,30 +1,18 @@
 global u8 super_ball_style
-
 // 0 -> off, >= 1 -> dropping the hammer.
 global u8 hammer_drop_state
-//define hammer_drop_state = u8[DEBUG_ADDRESS]
-// -1 -> Left, 0 -> Down, 1 -> Right
-global s8 hammer_drop_direction
 // Used for animation after bouncing from hammer drop, and as the cooldown of hammer drop.
 global u8 hammer_drop_rebound
 // --
 global u8 hammer_crash
 // --
 global u8 hammer_crash_lock
-// A copy of x-velocity used when bouncing with the hammer drop during super-ball state.
-global s16 stored_velocity
-// 0 -> off, 1 -> revving up but can't bounce, >= 2 -> bouncy ball.
-global u8 bouncy_ball_state
-// 0 -> off, -1 -> clinging to left wall, 1 -> clinging to right wall.
-global s8 wall_cling
-// Timer that allows clinging to walls.
-global u8 cling_timer
-// State for spindashing while clinging to a wall.
-global u8 wall_spindash_state
+// --
+global u8 super_ball_state
+// --
+global u8 super_ball_animation_state
 // State for blocking damage from spike collisions.
 global u8 block_spikes
-// Animation value for bouncy ball state.
-global u8 bouncy_ball_frame
 // Flag used to denote that we will bounce later this frame.
 global s8 store_bounce
 // Copies of velocity used for bouncing.
@@ -35,12 +23,6 @@ global u8 mighty_wp_frame
 global u8 mighty_wp_timer
 // Flag to supress sounds. Only set in one place.
 global bool supress_sfx
-// --
-global u8 super_ball_state
-// -- 
-global u8 super_ball_cooldown
-//define super_ball_state = u8[DEBUG_ADDRESS]
-global u8 super_ball_animation_state
 
 // Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
@@ -98,21 +80,13 @@ function void Character.Initialization.shared(u8 character)
 {
     // Reset all global state on initialization.
     hammer_drop_state = 0
-    hammer_drop_direction = 0
     hammer_drop_rebound = 0
     hammer_crash = 0
-    bouncy_ball_state = 0
-    bouncy_ball_frame = 0
     super_ball_state = 0
-    super_ball_cooldown = 0
     super_ball_animation_state = 0
-    wall_cling = 0
-    cling_timer = 0
     block_spikes = 0
-    store_bounce = 0
     velocity.x.copy = 0
     velocity.y.copy = 0
-    stored_velocity = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
     clearTaggedObjects()
@@ -138,31 +112,21 @@ function void Character.BaseUpdate.Sonic()
         {
             // Reset ability states.
             hammer_drop_state = 0
-            hammer_drop_direction = 0
             hammer_drop_rebound = 0
-            bouncy_ball_state = 0
-            bouncy_ball_frame = 0
-            wall_cling = 0
-            cling_timer = 0
         }
 
         if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE)) //|| (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300)))) //|| ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
         {
             super_ball_state = 0
-            super_ball_cooldown = 0
-            stored_velocity = 0
             hammer_crash_lock = 0
         }
         base.Character.BaseUpdate.Sonic()
         if (super_ball_state && !(char.flags & char.flag.ROLLING))
             super_ball_state = 0
 
-        if (!(char.flags & char.flag.ROLLING) && abs(char.groundspeed) < 0x200)
-            super_ball_cooldown = 0
         block_spikes = 0
         // Update custom animations.
         updateWinPose()
-        updateBouncyBallAnim()
         updateSuperBallAnim()
     }
     return
@@ -201,39 +165,12 @@ function void updateGameObjectLoop()
         hammer_drop_rebound = hammer_drop_state ? 12 : 0
         // Reset hammer drop state.
         hammer_drop_state = 0
-        hammer_drop_direction = 0
         hammer_crash = 0
         // Don't reset bouncy ball state, it's allowed to carry over between bounces.
     }
 }
 
 /*
-// DISABLED SUPER BALL JUMP HEIGHT
-//# translated(0x0117da) end(0x0118ba)
-//# translated(0x015002) end(0x0150d8)
-//# translated(0x017710) end(0x0177e8)
-function bool Character.CheckStartJump()
-{
-    bool result = false
-    if (!isMighty())
-    {
-        result = base.Character.CheckStartJump()
-    }
-    else
-    {
-        s16 vx_temp = char.velocity.x
-        s16 vy_temp = char.velocity.y
-        result = base.Character.CheckStartJump()
-
-        if (result && super_ball_state)
-        {
-            char.velocity.x -= (char.velocity.x - vx_temp) >> 4
-            char.velocity.y -= (char.velocity.y - vy_temp) >> 4
-        }
-    }
-    return result
-}
-*/
 function void Character.updateJumpMoves()
 {
     if (!isMighty())
@@ -245,41 +182,9 @@ function void Character.updateJumpMoves()
     base.Character.updateJumpMoves()
     // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
     char.double_jump_state = 0
-
-    // If not clinging to a wall, and allowed to start clinging...
-    if (!wall_cling && cling_timer)
-    {
-        // Increment the timer, but wrap back to 0 eventually.
-        cling_timer += 1
-        cling_timer &= 0x1f
-    }
     
-    // If we're not hammer dropping and not spindashing...
-    // (The second check is needed; it is possible to be spindashing in the air in specific circumstances.)
-    if (!hammer_drop_state && !char.spindash)
-    {
-        // If holding jump and not in LIFTED state and not being pushed by "fans"...
-        if ((control.pad1.state & CONTROL_ABC) && (char.state != char.state.LIFTED) && !isFloating())
-        {
-            // Enter bouncy ball state. Note that bouncy ball state must be >= 2 to have an effect.
-            // BOUNCY BALL DISABLED
-            //bouncy_ball_state = max(bouncy_ball_state, 1)
-        }
-        // If jump was pressed and we're not clinging to a wall...
-        if ((control.pad1.pressed & CONTROL_ABC) && !wall_cling)
-        {
-            // Start the timer to allow clinging to walls.
-            // WALL CLING DISABLED
-            //cling_timer = 1
-        }
-    }
-    // If in bouncy ball state and no longer holding jump...
-    if ((bouncy_ball_state == 1) && !(control.pad1.state & CONTROL_ABC))
-    {
-        // End bouncy ball state.
-        bouncy_ball_state = 0
-    }
 }
+*/
 
 function void SonicPressedJumpInMidAir()
 {
@@ -289,16 +194,10 @@ function void SonicPressedJumpInMidAir()
         return
     }
 
-    // Literally nothing that Knuckles' jump function does can be kept for Mighty
+    // Literally nothing that Sonic's jump function does can be kept for Mighty
     // except for clearing these values, so this hook does not call the base.
     char.rotation.both = 0
     char.flags &= ~char.flag.CONTROL_LOCK
-
-    // If holding down...
-    //if (control.pad1.state & CONTROL_DOWN)
-    //{
-    // End the bouncy ball state.
-    // bouncy_ball_state = 0
 
     // Start the hammer drop.
     if (!hammer_drop_rebound && !hammer_crash_lock)
@@ -306,30 +205,9 @@ function void SonicPressedJumpInMidAir()
         hammer_drop_state = 1
         if (control.player1.state & CONTROL_DOWN)
             hammer_crash = 1
-        
-
-        /*
-        // SUPER BALL AIR VELOCITY DISABLED
-        if (super_ball_state)
-        {
-            stored_velocity = 0x280 + (max(sqrt(u32(square(char.velocity.x)) + u32(square(char.velocity.y))), 0x600) >> 1)
-            stored_velocity = min(stored_velocity, 0x800)
-            stored_velocity = (char.velocity.x < 0) ? -stored_velocity : stored_velocity
-        }
-        */
     }
-
-    // Set the appropriate direction (it stays at 0 if we're going straight down).
-    /*
-    // SIDEWAYS HAMMER DROP DISABLED
-    if (control.pad1.state & CONTROL_LEFT)
-        hammer_drop_direction = -1
-    else if (control.pad1.state & CONTROL_RIGHT)
-        hammer_drop_direction = 1
-    */
-    if (!hammer_drop_direction)
-        char.velocity.x >>= 1
-    //}
+    
+    char.velocity.x >>= 1
     return
 }
 
@@ -341,101 +219,20 @@ function void Character.UpdateControlInAir()
     base.Character.UpdateControlInAir()
     if (!isMighty())
         return
-    
-    // If we have bounced at least once during bouncy ball state...
-    if (bouncy_ball_state >= 3)
-    {
-        s16 maxSpeed = s16[A4]
-		s16 acceleration = s16[A4 + 2]
-        s16 dv = 0//(acceleration >> 2) * 3
-        // If this is true, then air drag was applied to the character.
-        if (char.velocity.y < 0 && char.velocity.y >= -0x400)
-        {
-            // Undo half of the air drag.
-            char.velocity.x += (char.velocity.x >> 6) + (char.velocity.x >> 11)
-        }
-        // Allow extra acceleration during bouncy ball while pressing directions.
-        if (control.player1.state & CONTROL_LEFT)
-        {
-            char.velocity.x -= dv
-        }
-        else if (control.player1.state & CONTROL_RIGHT)
-        {
-            char.velocity.x += dv
-        }
-
-        if (control.player1.state & CONTROL_UP)
-        {
-            char.velocity.y -= (char.velocity.y < 0) ? (dv + dv >> 2) : dv
-        }
-        else if (control.player1.state & CONTROL_DOWN)
-        {
-            char.velocity.y += dv
-        }
-        centerCameraYOffset()
-    }
-
-    /*
-    // DISABLE SUPER BALL ANIT AIR DRAG
-    if (super_ball_state)
-    {
-        if (char.velocity.y < 0 && char.velocity.y >= -0x400)
-        {
-            // Undo the air drag.
-            s16 dv = (char.velocity.x >> 5) + (char.velocity.x >> 10)
-            char.velocity.x += dv
-        }
-    }
-    */
 
     if (hammer_drop_state)
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
-        s16 dy = (hammer_drop_direction ? 0x99 : 0xd8)
+        s16 dy = 0xd8
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
 
         // Cancel any upward y-velocity the player has, and accelerate.
         char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0x1000)
-        // Add x-velocity in the appropriate direction (none if going down).
-        
-        char.velocity.x = clamp(char.velocity.x + u16(0x88) * hammer_drop_direction, -0x800, 0x800)
     }
     if (hammer_drop_rebound)
         hammer_drop_rebound--
-    
-    // Limit velocity.y
-	s16 max_vy = (char.flags & char.flag.UNDERWATER) ? -0x200 : -0x400
-    if (bouncy_ball_state && !(control.player1.state & CONTROL_ABC) && char.velocity.y < max_vy)
-        char.velocity.y = min(char.velocity.y + 0x80, max_vy)
-    
-    /*
-    // DISABLED STORED VELOCITY
-    if (super_ball_state && hammer_drop_state)
-    {
-        s16 amount = clamp(char.velocity.x, -0xc0, 0xc0)
-        //stored_velocity.x += amount
-        char.velocity.x -= amount
-    }
-
-    if (super_ball_state && !hammer_drop_state && stored_velocity)
-    {
-        s16 amount = 0
-        if (abs(stored_velocity) > 0x800)
-            amount = stored_velocity >> 4
-        else
-            amount = clamp(stored_velocity, -0x80, 0x80)
-        stored_velocity -= amount
-        char.velocity.x += amount
-    }
-    */
-
-    //if (super_ball_state && !hammer_drop_state && !stored_velocity)
-    //{
-    //    s16 dx = (char.flags & char.flag.FACING_LEFT) ? -0x40 : 0x40
-    //    char.velocity.x = clamp(char.velocity.x + dx, -0x800, 0x800)
-    //}
 }
 
 function void Character.LandingOnGroundResetState()
@@ -449,7 +246,7 @@ function void Character.LandingOnGroundResetState()
     // See the hook to updateGameObjectLoop() for more information.
     
     // If we are in a bouncing state...
-    if (hammer_drop_state || (bouncy_ball_state >= 2 && control.player1.state & CONTROL_ABC))
+    if (hammer_drop_state)
     {
         // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
         if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
@@ -458,14 +255,6 @@ function void Character.LandingOnGroundResetState()
         velocity.x.copy = mainchar.groundhit.velocity.x
         velocity.y.copy = mainchar.groundhit.velocity.y
         playSound(hammer_drop_state ? 0x5f : 0x49)
-
-        // Reset wall cling values.
-        wall_cling = 0
-        cling_timer = 0
-    }
-    else if (bouncy_ball_state >= 2 && !(control.player1.state & CONTROL_ABC) && !hammer_drop_state)
-    {
-        bouncy_ball_state = 0
     }
     else if (super_ball_state)
     {
@@ -482,40 +271,17 @@ function void mightyBounce()
     velocity.x.copy = 0
     velocity.y.copy = 0
 
-    // The angle of our movement.
-    u8 move_angle = lookupAngleByVector(vx, vy)
     // The angle to bounce toward.
     u8 reflected_angle = char.rotation - 0x40
     s16 force = 0
-    if (hammer_drop_state)
-    {
-        //if (super_ball_state)
-        //    force = 0x780
-        //else
-        {
-            //if (hammer_drop_state <= 0xc)
-            //    force = 0x780
-            //else if (hammer_drop_state <= 0x14)
-            //    force = 0xa80
-            
-        }
-        
-        if (hammer_crash)
-        {
-            force = 0x200
-            hammer_crash_lock = 1
-        }
-        else
-            force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * (hammer_drop_direction ? 0x20 : 0xc0)
 
-        
-    }
-    else if (bouncy_ball_state)
+    if (hammer_crash)
     {
-        force = hypot(vx, vy)
-        force -= 0x100
-        force = clamp(force, 0x400, 0xc00)
+        force = 0x200
+        hammer_crash_lock = 1
     }
+    else
+        force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * 0xc0
 
     char.velocity.x += (s32(lookupCos(reflected_angle)) * force) >> 8
     char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
@@ -535,24 +301,6 @@ function void mightyBounce()
     char.flags &= ~char.flag.PUSHING
     char.jumping = 1
     char.on_convex_surface = 0
-
-    if (hammer_drop_state && super_ball_state)
-    {
-        // bouncy_ball_state = 2
-    }
-    else if (bouncy_ball_state)
-    {
-        bouncy_ball_state += 1
-        if (bouncy_ball_state == BOUNCY_BALL_MAX)
-            bouncy_ball_state = 0
-    }
-
-    if (super_ball_state && hammer_drop_state)
-    {
-        u8 opposite_dir = (stored_velocity < 0) ? CONTROL_RIGHT : CONTROL_LEFT
-        if (control.player1.state & opposite_dir)
-            stored_velocity = -stored_velocity
-    }
 }
 
 //# address-hook(0x00ffd4) end(0x010214)
@@ -577,7 +325,7 @@ function void Character.CheckCollisionsWithDynamicObjects_partial()
         destroyObstacles()
     
     // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || bouncy_ball_state || super_ball_state || (char.spindash & 0x80)))
+    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6)))
     {
         // Grant invincibility for collisions.
         u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
@@ -604,37 +352,7 @@ function void Character.CheckCollision()
         base.Character.CheckCollision()
         return
     }
-    // If we are allowed to cling to walls and we are in the NORMAL state and knuckles would be allowed to cling to walls...
-    if (cling_timer && char.base_state == base_state.NORMAL && !knuckles.preventclimbing)
-    {
-        // Check if we are colliding with a wall, and if so, cling to it.
 
-        // This needs to be set for the collision checking functions.
-        D5.u8 = char.layer_flags2
-        // Moving to the right...
-        if (char.velocity.x > 0)
-        {
-            Character.CheckRightWallCollision()
-            // If a collision was detected and the rotation of the tile is a 90° angle...
-            if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
-            {
-                wall_cling = 1
-                cling_timer = 0
-            }     
-        }
-        // Moving to the left...
-        else if (char.velocity.x < 0)
-        {
-            Character.CheckLeftWallCollision()
-            // If a collision was detected and the rotation of the tile is a 90° angle..
-            if (D1.s16 < 0 && ((D3.u8 & 0x3f) == 0))
-            {
-                wall_cling = -1
-                cling_timer = 0
-            }
-        }
-        // No need to do any kind of position adjustments. The base function will handle that for us.
-    }
     s16 velocity_temp.x = char.velocity.x
     s16 velocity_temp.y = char.velocity.y
     base.Character.CheckCollision()
@@ -646,40 +364,6 @@ function void Character.CheckCollision()
             char.velocity.x = velocity_temp.x
         }
     }
-    // If we are clinging to a wall...
-    if (wall_cling == 1 || wall_cling == -1)
-    {
-        // Remove all velocity and play the sound.
-        // NOTE: Clinging to walls disables a lot of character code, including this function. (See the next hook
-        // for more details.) So this block will only run once when the wall first gets grabbed.
-        char.velocity.x = 0
-        char.velocity.y = 0
-        if (wall_cling == -1)
-            char.flags |= char.flag.FACING_LEFT
-        else
-            char.flags &= ~char.flag.FACING_LEFT
-        
-        bouncy_ball_state = 0
-        playSound(SFX_GRAB)
-    }
-}
-
-//# address-hook(0x011350) end(0x0113f4)
-function void Character.UpdateControlOnGroundShared()
-{
-    s16 groundspeed_temp = char.groundspeed
-    base.Character.UpdateControlOnGroundShared()
-    /*
-    // DISABLE WRECKING BALL ANTI-FRICTION
-    if (isMighty() && super_ball_state)
-    {
-        if (char.groundspeed == 0 && groundspeed_temp != 0)
-        {
-            groundspeed_temp -= (groundspeed_temp < 0) ? -0x60 : 0x60
-            char.groundspeed = groundspeed_temp
-        }
-    }
-    */
 }
 
 function void updateCharacterControlOnGround()
@@ -702,196 +386,33 @@ function void updateCharacterControlOnGround()
 //# address-hook(0x011036) end(0x01105e)
 function void Character.UpdateSonicRollingInAir()
 {
-    // If we're clinging to a wall...
-    if (isMighty() && wall_cling)
-    {
-        // This branch deliberately does not call the base function. This disables most of the update code
-        // that would be run for the character, which essentially freezes the character in place and prevents
-        // all normal controls. This works great for the wall cling, and the player can jump off to end it.
-        
-        if (wall_spindash_state)
-        {
-            wall_spindash_state += 1
-            char.position.y += (global.inv_gravity) ? 0x8000 : -0x8000
-            if (wall_spindash_state == 0x96 || !(control.player1.state & (CONTROL_UP | CONTROL_DOWN)))
-            {
-                /*
-                char.velocity.y = -(0x400 + (wall_spindash_state >> 3) * 0x40)
-                if (global.inv_gravity)
-                    char.velocity.y = -char.velocity.y
-                if (char.flags & char.flag.UNDERWATER)
-                    char.velocity.y >>= 1
-                */
-                jumpOffWall()
-                char.state = char.state.ROLLING
-                wall_spindash_state = 0
-
-                // End the wall cling.
-                wall_cling = 0
-                char.double_jump_state = 0
-            }
-        }
-        // If jump was pressed...
-        else if ((control.player1.pressed & CONTROL_ABC))
-        {
-            if (!(control.player1.state & (CONTROL_UP | CONTROL_DOWN)))
-            {
-                jumpOffWall()
-            }
-            else
-            {
-                wall_spindash_state = 1
-                char.state = char.state.SPINDASH
-                playSound(SFX_SPINDASH_CHARGE)
-            }
-        }
-        
-        if (wall_cling)
-        {
-            // The player cannot move in this state, but other objects might push the character. We need to check for this.
-            // This needs to be set for the collision checking functions.
-            D5.u8 = char.layer_flags2
-            if (wall_cling == -1)
-                Character.CheckLeftWallCollision()
-
-            else if (wall_cling == 1)
-                Character.CheckRightWallCollision()
-            // This value should be exactly 0. If it is not, something pushed us left or right.
-            if (D1.s16 != 0)
-            {
-                // If so, end the wall cling.
-                wall_cling = 0
-                wall_spindash_state = 0
-                setRollingState()
-            }
-        }
-        // Return without calling the base.
-        return
-    }
-
     if (isMighty() && (super_ball_style == 1) && (control.player1.pressed & CONTROL_DOWN))
-    {
         super_ball_state ^= 1
-    }
+    
     else if (isMighty() && (super_ball_style == 0) && hypot(char.velocity.x, char.velocity.y) >= 0xb00)
-    {
         super_ball_state = 30
-    }
+    
     else if (isMighty() && super_ball_state && (super_ball_style == 0) && abs(char.groundspeed < 0xb00))
-    {
         super_ball_state -= 1
-    }
+    
     base.Character.UpdateSonicRollingInAir()
-}
-
-// Helper function
-function void jumpOffWall()
-{
-    // Jump off the wall.
-    char.velocity.y = (global.inv_gravity) ? 0x4c0 : -0x4c0
-    char.velocity.x = (wall_cling == 1) ? -0x280 : 0x280
-    if (char.flags & char.flag.UNDERWATER)
-        char.velocity.y >>= 1
-
-    // End the wall cling.
-    wall_cling = 0
-    wall_spindash_state = 0
-    char.double_jump_state = 0
-    playSound(SFX_JUMP)
 }
 
 function void updateCharacterRollingOnGround()
 {
-    if (isMighty())
-        stored_velocity = 0
-    
     if (isMighty() && (super_ball_style == 1) && (control.player1.pressed & CONTROL_DOWN))
-    {
         super_ball_state ^= 1
-    }
+    
     else if (isMighty() && (super_ball_style == 0) && abs(char.groundspeed >= 0xb00))
-    {
         super_ball_state = 30
-    }
+    
     else if (isMighty() && super_ball_state && (super_ball_style == 0) && abs(char.groundspeed < 0xb00))
-    {
         super_ball_state -= 1
-    }
+    
 
     base.updateCharacterRollingOnGround()
     if (abs(char.groundspeed) <= 0x300)
         super_ball_state = 0
-}
-
-//# translated(0x011bde) end(0x011cf0)
-//# translated(0x011d16) end(0x011da4)
-//# translated(0x0151fc) end(0x01530c)
-//# translated(0x015332) end(0x0153c0)
-function bool Character.UpdateSpindash()
-{
-    bool result = base.Character.UpdateSpindash()
-    // SUPER BALL FROM PEELOUT DISABLED
-    // if (isMighty() && !result)
-    // {
-    //     result = Character.updateSuperPeelout()
-    // }
-    return result
-}
-
-function bool Character.updateSuperPeelout()
-{
-    u8 spindash_temp = char.spindash
-    u16 spindash_charge_temp = char.spindash_charge
-    bool result = base.Character.updateSuperPeelout()
-    if (isMighty() && result)
-    {
-        if (spindash_temp == 0 && char.spindash != 0)
-		{
-            // Set state of dust cloud object to 0x02
-            if (char.drown_countdown >= 12)
-			    u8[A6 + 0x20] = 0x02
-		}
-        
-        if (char.spindash_charge > 0x80 && char.spindash_charge < 0x800)
-            char.spindash_charge -= 0x12
-        
-        if (/*(spindash_charge_temp < 0x400 && char.spindash_charge >= 0x400) || */(spindash_charge_temp != 0x800 && char.spindash_charge == 0x800))
-            Audio.playAudio("peelout_charge", AudioContext.CONTEXT_SOUND)
-    }
-    return result
-}
-
-function void releaseSuperPeelout()
-{
-    if (isMighty() && char.spindash_charge >= 0x800)
-    {
-        char.groundspeed -= (char.groundspeed >> 2)
-    }
-    base.releaseSuperPeelout()
-    if (isMighty())
-    {
-        //super_ball_state = 1
-        super_ball_animation_state = 0
-        setRollingState()
-    }
-}
-
-//# address-hook(0x018c20) end(0x018c82)
-function void fn018c20()
-{
-    // Dust sprite
-    if (is_ES && (u8[A2 + 0x38] == CHARACTER_BASE) && (u8[A2 + 0x3d] & 0x80))
-    {
-        u32 char_address = 0xffff0000 + objA0.dustcloud.character_address
-        u8 spindash_temp = u8[char_address + 0x3d]
-        u8[char_address + 0x3d] = 1
-        base.fn018c20()
-        u8[char_address + 0x3d] = spindash_temp
-    }
-    else
-    {
-        base.fn018c20()
-    }
 }
 
 function void Character.updateUprightOnGroundInner()
@@ -964,21 +485,6 @@ function void updateWinPose()
         mighty_wp_timer = 0
         mighty_wp_frame = 0
 	}
-}
-
-// Helper function
-function void updateBouncyBallAnim()
-{
-    if (bouncy_ball_state)
-        bouncy_ball_frame += 1
-    else
-        bouncy_ball_frame = 0
-    
-    if (bouncy_ball_state == 1)
-        bouncy_ball_state = 2
-        
-    if (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 12)
-        bouncy_ball_frame -= 12
 }
 
 // Helper function

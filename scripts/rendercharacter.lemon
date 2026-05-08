@@ -53,8 +53,6 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
-		else if (wall_cling && !wall_spindash_state)
-			return "mighty_grab_wall"
 		else if (hammer_drop_rebound >= 7)
 		{
 			if (hammer_drop_rebound == 12)
@@ -70,8 +68,6 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		else if (hammer_drop_state)
 		{
             str = "mighty_hammer_drop_"
-            if (hammer_drop_direction)
-                str += "45_"
 			if (hammer_drop_state <= 2)
 				str += "0x00"
 			else if (hammer_drop_state <= 4)
@@ -79,12 +75,6 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			else
 				str += (stringformat("0x%02x", ((((hammer_drop_state - 4) % 12) / 3) + 2)))
             return str
-		}
-		else if (bouncy_ball_frame > BOUNCY_BALL_WINDUP && (control.player1.state & CONTROL_ABC))
-		{
-			str = "mighty_bounce_"
-			str += (bouncy_ball_frame > BOUNCY_BALL_WINDUP + 6) ? "1" : "0"
-			return str
 		}
 		else if (super_ball_state || char.spindash == 0x80)
 		{
