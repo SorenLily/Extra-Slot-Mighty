@@ -82,7 +82,7 @@ function u32 getEmptyBuffer(u32 bytes)
 function string getCharacterSelectSpriteKey(u8 character)
 {
 	if (ES_data[getSaveSlotIndex() + is_partner] == my_char_slot && is_partner == (character == CHARACTER_TAILS) && !ES_data[getSaveSlotIndex() + 2])
-		return ("charselect_" + CHAR_KEY)
+		return ("charselect_mighty")
 
 	return base.getCharacterSelectSpriteKey(character)
 }
@@ -242,26 +242,6 @@ function void fn00d39e()
 	}
 }
 
-/*
-// dataselect_slot.update()
-//# address-hook(0x00d42c) end(0x00d69a)
-function void fn00d42c()
-{
-	// This "filler byte" is apparently unused in the original game. Sonic 3 AIR uses it to store a random number seed.
-	u8 filler_byte_temp = u8[u32[A0 + 0x30] + 0x01]
-	base.fn00d42c()
-	// If the filler byte has changed, then a new game has been initialized. If an ES character was selected...
-	if (filler_byte_temp != u8[A1 + 0x01] && (my_char_slot == ES_data[getSaveSlotIndex()]) && !is_partner && !ES_data[getSaveSlotIndex() + 2])
-	{
-		if (CHARACTER_BASE == 0)
-			levelselect.characters = 4 - levelselect.characters
-		// Also adjust the saved character value.
-		u8[A1 + 0x02] = (u8[A1 + 0x02] & 0x0f) | (levelselect.characters << 4)
-		SaveGameSlot()
-	}
-}
-*/
-
 // NOTE: This function is not a bool. Even though its signature says "bool", it can return 0, 1, or 2.
 function bool fn00d458()
 {
@@ -289,9 +269,6 @@ function bool fn00d458()
 		// Check extra save slot data to see if this is a Mighty save.
 		if (save_slot_data & (1 << slot_index))
 		{
-			// If so, set the save slot's character value to be in-bounds, and mark that we are playing as mighty.
-			//if (CHARACTER_BASE == 0)
-			//	levelselect.characters = 4 - levelselect.characters
 			is_ES = 1
 		}
 		// Save ES data anyway.
@@ -385,8 +362,6 @@ function void fn00d30c()
 	if (selected_char_base)
 	{
 		is_ES = 1
-		//if (selected_char_base == 1)
-		//	levelselect.characters = 4 - levelselect.characters
 	}
 }
 
@@ -462,8 +437,6 @@ function u16 ActSelect.TranslateZoneAct(u8 zoneNumber, u8 act)
 	if (my_char_slot == (is_partner ? act_select_partner_index : act_select_char_index))
 	{
 		is_ES = true
-		//if (CHARACTER_BASE == 0)
-		//	levelselect.characters = 4 - levelselect.characters
 	}
 	
 	return base.ActSelect.TranslateZoneAct(zoneNumber, act)
@@ -473,7 +446,7 @@ function u16 ActSelect.TranslateZoneAct(u8 zoneNumber, u8 act)
 function string getESCharKey(bool partner)
 {
 	if (is_partner == partner && my_char_slot == (partner ? act_select_partner_index : act_select_char_index))
-		return capitalizeFirstChar(CHAR_KEY)
+		return CHARACTER_NAME
 
 	return base.getESCharKey(partner)
 }
@@ -511,29 +484,6 @@ function string ActSelect.GetCharacterCombinationSprite(u8 index)
 		return base.ActSelect.GetCharacterCombinationSprite(index)
 	// We have to override drawing the character sprites and do it ourselves.
 	return "act_select_character_sprite_override"
-}
-
-function string capitalizeFirstChar(string str)
-{
-	// This function capitalizes the first character of the input strings.
-	// If you don't know how Ascii works, this won't make any sense.
-	u8 A = 0x41
-	u8 Z = 0x5a
-	u8 a = 0x61
-	u8 z = 0x7a
-	u8 first_char = getchar(str, 0)
-
-	// Do nothing if the first character is not a letter.
-	if (first_char < A || first_char > z || (first_char > Z && first_char < a))
-		return str
-	// Do nothing if the first character is already upper case.
-	if (first_char <= Z)
-		return str
-
-	first_char -= (a - A)
-	string result = getStringFromCharacter(first_char)
-	result += substring(str, 1, str.length() - 1)
-	return (result)
 }
 
 function void ActSelect.DrawMenu(u8 selectedEntry, u8 selectedZone, u8 selectedAct, s16 anchorX)

@@ -1,0 +1,330 @@
+global bool trigger_mgz_spinwheel
+
+function void Character.LandingOnGroundResetState()
+{
+    base.Character.LandingOnGroundResetState()
+    // NOTE: Even though A0 is always the character here, this function can be called by many objects, not just the character.
+    if (!isMighty())
+        return
+
+    // NOTE: Here we do not actually run any bounce logic, we just set a flag that we will bounce later in the frame.
+    // See the hook to updateGameObjectLoop() for more information.
+    
+    // If we are in a bouncing state...
+    if (hammer_drop_state)
+    {
+        bool do_not_bounce = false
+        if (char.flags & char.flag.ON_OBJECT)
+        {
+            // Don't bounce if we hit the following objects:
+            u32 object_standing_on = u32[0xffff0000 + char.object_standing_on]
+            // MGZ Tar Pit
+            do_not_bounce |= object_standing_on == 0x032aae
+            // ICZ Trampoline
+            do_not_bounce |= object_standing_on == 0x08b8b6
+            // MGZ spintop floor barrier
+            do_not_bounce |= (break_mgz_spintop_floor == 2)
+        }
+
+        // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
+        if (!do_not_bounce)
+            store_bounce = 1
+        
+        // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
+        velocity.x.copy = mainchar.groundhit.velocity.x
+        velocity.y.copy = mainchar.groundhit.velocity.y
+        playSound(hammer_drop_state ? 0x5f : 0x49)
+    }
+    else if (super_ball_state)
+    {
+        setRollingState()
+    }
+    hammer_crash_lock = 0
+}
+
+function void updateGameObjectLoop()
+{   
+    base.updateGameObjectLoop()
+    // I hate that I need to put the bounce code here, but there's just no other practical way.
+    // The problem is that landing on the ground can happen either during the character's update function,
+    // or during the update function of other objects that allow the player to land on them, or both! This
+    // causes multiple issues when trying to bounce on the ground. Sometimes the character will bounce during
+    // their update function and accelerate up, causing them to not land on (and interact with) an object that
+    // they should. Other times the player can land on an object during that object's update function, and
+    // end up in an unexpected state since it can bypass any checks in the character's code.
+
+    // The only (good) way to deal with this whole situation is to handle the bounce code after all other
+    // updates have run. This means it definitely only runs once, does not interfere with object interactions,
+    // and our checks and state will not be violated later in the frame.
+
+    // If player 1 is mighty and we have triggered a bounce...
+    if (is_ES && (u32[0xffffb000] == 0x010a94) && store_bounce)
+    {
+        // Set A0 to the player to make things simpler.
+        u32 a0_temp = A0
+        A0 = 0xffffb000
+        // If we are still in control of the player and on the ground...
+        // (The IN_AIR check is needed because some objects, like springs, cause you to land but then immediately go back in the air.)
+        if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE) && !(char.flags & char.flag.IN_AIR))
+        {
+            mightyBounce()
+        }
+        A0 = a0_temp
+        store_bounce = 0
+        // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
+        hammer_drop_rebound = hammer_drop_state ? 12 : 0
+        // Reset hammer drop state.
+        hammer_drop_state = 0
+        hammer_crash = 0
+        // Don't reset bouncy ball state, it's allowed to carry over between bounces.
+    }
+
+    trigger_mgz_spinwheel = false
+}
+
+////////////////////
+///    SPIKES    ///
+////////////////////
+
+function bool inBallState()
+{
+    return (super_ball_state || hammer_drop_state)
+}
+
+// Floor, Ceiling, and Wall spikes all have different update functions, so we need 3 hooks to account for them.
+
+//# address-hook(0x024090) end(0x0240dc)
+function void Spikes.Update()
+{
+    // Floor spikes.
+    if (inBallState())
+        block_spikes = 1
+
+    base.Spikes.Update()
+}
+
+//# address-hook(0x0240e2) end(0x024138)
+function void fn0240e2()
+{
+    // Wall spikes.
+    if (inBallState())
+        block_spikes = 2
+
+    base.fn0240e2()
+}
+
+//# address-hook(0x02413e) end(0x024188)
+function void fn02413e()
+{
+    // Ceiling spikes.
+    if (inBallState())
+        block_spikes = 1
+
+    base.fn02413e()
+}
+
+// Also, in some zones, damaging blocker elements look like spikes, even though they're not. In HCZ, there's a
+// strip of "spikes" that is actually just a damaging blocker element, and in ICZ the icicle-spikes are also
+// damaging blocker elements. And they also have 3 different update functions based on orientation, so we need
+// another 3 hooks.
+
+//# address-hook(0x01f45e) end(0x01f4c2)
+function void fn01f45e()
+{
+    // Floor hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
+        block_spikes = 1
+
+    base.fn01f45e()
+}
+
+//# address-hook(0x01f4c4) end(0x01f526)
+function void fn01f4c4()
+{
+    // Wall hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
+        block_spikes = 2
+    
+    base.fn01f4c4()
+}
+
+//# address-hook(0x01f528) end(0x01f58a)
+function void fn01f528()
+{
+    // Ceiling hazard.
+    if ((global.zone == 0x01 || global.zone == 0x05) && inBallState())
+        block_spikes = 1
+    
+    base.fn01f528()
+}
+
+//# address-hook(0x08b4ec) end(0x08b526)
+function void fn08b4ec()
+{
+    // ICZ ice crystals
+    if (inBallState())
+        block_spikes = 1
+
+    base.fn08b4ec()
+}
+
+//# address-hook(0x0411d8) end(0x04120a)
+//# translated(0x04121e) end(0x04126c)
+function void fn0411d8()
+{
+    if (inBallState())
+        block_spikes = 1
+
+    base.fn0411d8()
+}
+
+//# address-hook(0x024280) end(0x0242b4)
+function void DamageCharacter()
+{
+    if (is_ES && A1 == 0xffffb000 && block_spikes)
+    {
+        if (block_spikes == 1)
+            playSound(SFX_HITSPIKES)
+
+        block_spikes = 0
+        return
+    }
+    base.DamageCharacter()
+}
+
+////////////////////
+///    OTHERS    ///
+////////////////////
+
+global bool bounce_on_object
+global bool change_state_after_landing
+global u32 barrel_to_push_down
+global u8 break_mgz_spintop_floor
+
+//# address-hook(0x01e490)
+function void LetSonicClimbOnObject()
+{
+    if (!is_ES || A1 != 0xffffb000)
+    {
+        base.LetSonicClimbOnObject()
+        return
+    }
+
+    if (hammer_drop_state && u32[A0] == 0x0209d0 && break_mgz_spintop_floor)
+    {
+        u8[A1 + 0x37] |= 0x80
+        break_mgz_spintop_floor = 2
+    }
+
+    base.LetSonicClimbOnObject()
+    if (!is_ES || A1 != 0xffffb000)
+        return
+    
+    if (bounce_on_object)
+    {
+        // Remove the ON_OBJECT flags from the character and the object they landed on.
+        objA0.flags2a &= ~object.flag.P1_ON_OBJECT
+        objA1.flags2a &= ~char.flag.ON_OBJECT
+    }
+    else if (hammer_crash && u32[A0] == addressof(CNZBarrel.Update) && u16[A0 + 0x3a] == 0)
+    {
+        barrel_to_push_down = A0
+    }
+
+}
+
+//# address-hook(0x0326b6) end(0x03270c)
+function void fn0326b6()
+{
+    // HCZ rotating pillar
+    if (is_ES && hammer_drop_state && !hammer_crash)
+        bounce_on_object = true
+
+    base.fn0326b6()
+    bounce_on_object = false
+}
+
+//# address-hook(0x025d9c) end(0x025ea0)
+function void fn025d9c()
+{
+    // MGZ Spin wheel trigger
+    u8 state_temp = u8[0xffffb020]
+    if (is_ES && hammer_drop_state)
+        change_state_after_landing = true
+
+    base.fn025d9c()
+    
+    if (change_state_after_landing && u8[0xffffb020] == char.state.SPINDASH)
+        u8[0xffffb020] = state_temp
+    
+    change_state_after_landing = false
+}
+
+//# address-hook(0x01dd0e) end(0x01dd22)
+function void fn01dd0e()
+{
+    u8 on_object_temp = u8[0xffffb02a] & char.flag.ON_OBJECT
+    base.fn01dd0e()
+    if (change_state_after_landing && u8[0xffffb02a] & char.flag.ON_OBJECT & ~on_object_temp)
+        u8[0xffffb020] = char.state.SPINDASH
+}
+
+//# address-hook(0x0317ae) end(0x03181c)
+function void fn0317ae()
+{
+    if (is_ES && A1 == 0xffffb000 && hammer_drop_state)
+        hammer_drop_state = 0
+    
+    base.fn0317ae()
+}
+
+//# address-hook(0x032f56) end(0x032fee)
+function void fn032f56()
+{
+    if (is_ES && A1 == 0xffffb000 && hammer_drop_state)
+        hammer_drop_state = 0
+    
+    base.fn032f56()
+}
+
+//# address-hook(0x032188) end(0x0321dc)
+function void CNZBarrel.Update()
+{
+    if (is_ES && hammer_drop_state && !hammer_crash)
+        bounce_on_object = true
+
+    base.CNZBarrel.Update()
+    bounce_on_object = false
+}
+
+//# address-hook(0x032208) end(0x0322ee)
+function void fn032208()
+{
+    // CNZ barrel that can be pushed up and down
+    if (barrel_to_push_down == A0)
+    {
+        if (((objA0.position.y.u16 - u16[A0 + 0x30] + 0x40) < 0x80))
+            objA0.velocity.y = 0x1ff
+        
+        barrel_to_push_down = 0
+    }
+
+    base.fn032208()
+}
+
+//# address-hook(0x0209d0) end(0x020a52)
+function void fn0209d0()
+{
+    s16 velocity_temp.y = s16[0xffffb01a]
+    if (is_ES && hammer_drop_state && !(u8[0xffffb037] & 0x80))
+        break_mgz_spintop_floor = true
+    
+    base.fn0209d0()
+    if (break_mgz_spintop_floor == 2)
+    {
+        s16[0xffffb01a] = velocity_temp.y
+        u8[0xffffb02a] |= char.flag.IN_AIR
+        u8[0xffffb037] &= ~0x80
+    }
+    break_mgz_spintop_floor = 0
+}

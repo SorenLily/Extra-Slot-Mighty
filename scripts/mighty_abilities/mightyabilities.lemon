@@ -8,6 +8,8 @@ global u8 hammer_crash
 // --
 global u8 hammer_crash_lock
 // --
+global s16 hammer_drop_starting_point
+// --
 global u8 super_ball_state
 // --
 global u8 super_ball_animation_state
@@ -128,63 +130,11 @@ function void Character.BaseUpdate.Sonic()
         // Update custom animations.
         updateWinPose()
         updateSuperBallAnim()
+        //debugLog(char.animation.sprite)
+        //debugLog(char.animation.frame)
     }
     return
 }
-
-function void updateGameObjectLoop()
-{   
-    base.updateGameObjectLoop()
-    // I hate that I need to put the bounce code here, but there's just no other practical way.
-    // The problem is that landing on the ground can happen either during the character's update function,
-    // or during the update function of other objects that allow the player to land on them, or both! This
-    // causes multiple issues when trying to bounce on the ground. Sometimes the character will bounce during
-    // their update function and accelerate up, causing them to not land on (and interact with) an object that
-    // they should. Other times the player can land on an object during that object's update function, and
-    // end up in an unexpected state since it can bypass any checks in the character's code.
-
-    // The only (good) way to deal with this whole situation is to handle the bounce code after all other
-    // updates have run. This means it definitely only runs once, does not interfere with object interactions,
-    // and our checks and state will not be violated later in the frame.
-
-    // If player 1 is mighty and we have triggered a bounce...
-    if (is_ES && (u32[0xffffb000] == 0x010a94) && store_bounce)
-    {
-        // Set A0 to the player to make things simpler.
-        u32 a0_temp = A0
-        A0 = 0xffffb000
-        // If we are still in control of the player and on the ground...
-        // (The IN_AIR check is needed because some objects, like springs, cause you to land but then immediately go back in the air.)
-        if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE) && !(char.flags & char.flag.IN_AIR))
-        {
-            mightyBounce()
-        }
-        A0 = a0_temp
-        store_bounce = 0
-        // Set this timer to enable the bouncing animation and start the hammer drop cooldown.
-        hammer_drop_rebound = hammer_drop_state ? 12 : 0
-        // Reset hammer drop state.
-        hammer_drop_state = 0
-        hammer_crash = 0
-        // Don't reset bouncy ball state, it's allowed to carry over between bounces.
-    }
-}
-
-/*
-function void Character.updateJumpMoves()
-{
-    if (!isMighty())
-    {
-        base.Character.updateJumpMoves()
-        return
-    }
-
-    base.Character.updateJumpMoves()
-    // Always keep this flag at 0. We don't need it for any of our abilities, and it does things we don't want.
-    char.double_jump_state = 0
-    
-}
-*/
 
 function void SonicPressedJumpInMidAir()
 {
@@ -200,9 +150,10 @@ function void SonicPressedJumpInMidAir()
     char.flags &= ~char.flag.CONTROL_LOCK
 
     // Start the hammer drop.
-    if (!hammer_drop_rebound && !hammer_crash_lock)
+    if (!hammer_drop_state && !hammer_drop_rebound && !hammer_crash_lock)
     {
         hammer_drop_state = 1
+        hammer_drop_starting_point = char.position.y.u16
         if (control.player1.state & CONTROL_DOWN)
             hammer_crash = 1
     }
@@ -235,34 +186,6 @@ function void Character.UpdateControlInAir()
         hammer_drop_rebound--
 }
 
-function void Character.LandingOnGroundResetState()
-{
-    base.Character.LandingOnGroundResetState()
-    // NOTE: Even though A0 is always the character here, this function can be called by many objects, not just the character.
-    if (!isMighty())
-        return
-
-    // NOTE: Here we do not actually run any bounce logic, we just set a flag that we will bounce later in the frame.
-    // See the hook to updateGameObjectLoop() for more information.
-    
-    // If we are in a bouncing state...
-    if (hammer_drop_state)
-    {
-        // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
-        if (!((char.flags & char.flag.ON_OBJECT) && (u32[0xffff0000 + char.object_standing_on] == 0x08b8b6)))
-            store_bounce = 1
-        // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
-        velocity.x.copy = mainchar.groundhit.velocity.x
-        velocity.y.copy = mainchar.groundhit.velocity.y
-        playSound(hammer_drop_state ? 0x5f : 0x49)
-    }
-    else if (super_ball_state)
-    {
-        setRollingState()
-    }
-    hammer_crash_lock = 0
-}
-
 // Helper function
 function void mightyBounce()
 {
@@ -281,7 +204,10 @@ function void mightyBounce()
         hammer_crash_lock = 1
     }
     else
-        force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * 0xc0
+    {
+        u8 div = (char.flags & char.flag.UNDERWATER) ? 3 : 2
+        force = 0x780 + min((max(hammer_drop_state / div, 6) - 6), 0x4) * 0xc0
+    }
 
     char.velocity.x += (s32(lookupCos(reflected_angle)) * force) >> 8
     char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
@@ -306,8 +232,28 @@ function void mightyBounce()
 //# address-hook(0x00ffd4) end(0x010214)
 function void Character.OnCollisionWithDynamicObject()
 {
+    base.Character.OnCollisionWithDynamicObject()
+}
+
+//# address-hook(0x00ffd4) end(0x010214)
+function void Character.OnCollisionWithDynamicObject()
+{
+    debugLog(objA1.collision_attributes)
+    debugLog(A1)
+    debugLog(u32[A1])
     s16 velocity_temp.x = char.velocity.x
     s16 velocity_temp.y = char.velocity.y
+    if (isMighty() && (u32[A1] == 0x06da24 || u32[A1] == 0x06de40 || u32[A1] == 0x088572) && hammer_drop_state)
+    {
+        hammer_drop_state = 0
+        hammer_drop_rebound = 12
+        char.velocity.y = clamp(char.velocity.y, -0x600, 0x600)
+    }
+    else if (isMighty() && hammer_drop_state && objA1.collision_attributes == 0xf)
+    {
+        hammer_drop_state = 0
+        hammer_drop_rebound = 12
+    }
     base.Character.OnCollisionWithDynamicObject()
     // If we are in hammer drop state and we didn't get HURT...
     if (isMighty() && hammer_drop_state && char.base_state != base_state.HURT)
@@ -368,7 +314,7 @@ function void Character.CheckCollision()
 
 function void updateCharacterControlOnGround()
 {
-    if (isMighty() && super_ball_state)
+    if (isMighty() && super_ball_state && super_ball_style == 1)
     {
         s16 dv = 0
         if (char.groundspeed > 0 && char.groundspeed <= 0x7f0 && !(control.player1.state & CONTROL_LEFT))
@@ -409,7 +355,6 @@ function void updateCharacterRollingOnGround()
     else if (isMighty() && super_ball_state && (super_ball_style == 0) && abs(char.groundspeed < 0xb00))
         super_ball_state -= 1
     
-
     base.updateCharacterRollingOnGround()
     if (abs(char.groundspeed) <= 0x300)
         super_ball_state = 0
@@ -424,7 +369,6 @@ function void Character.updateUprightOnGroundInner()
         if (char.groundspeed != 0)
         {
             u16 dv = 0xc
-            //dv >>= 1
             if (char.groundspeed < 0)
                 dv = -dv
             

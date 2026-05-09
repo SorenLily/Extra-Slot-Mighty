@@ -480,6 +480,7 @@ constant array<u32> obstacle_addresses =
     0x04172e, // SOZ Rocks
     0x0341bc, // MGZ Chain Spike Ball
     0x341fa,
+	0x34728, // MGZ spike totem
     0x557c8,
     0x3b1b2,
     0x3b1ea,
