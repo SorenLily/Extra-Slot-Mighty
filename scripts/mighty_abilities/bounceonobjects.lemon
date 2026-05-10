@@ -68,6 +68,7 @@ function void updateGameObjectLoop()
         if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE) && !(char.flags & char.flag.IN_AIR))
         {
             mightyBounce()
+            hammer_drop_rebound_protection = 30
         }
         A0 = a0_temp
         store_bounce = 0
@@ -315,6 +316,7 @@ function void fn032208()
 //# address-hook(0x0209d0) end(0x020a52)
 function void fn0209d0()
 {
+    // MGZ spintop floor barrier
     s16 velocity_temp.y = s16[0xffffb01a]
     if (is_ES && hammer_drop_state && !(u8[0xffffb037] & 0x80))
         break_mgz_spintop_floor = true
@@ -327,4 +329,17 @@ function void fn0209d0()
         u8[0xffffb037] &= ~0x80
     }
     break_mgz_spintop_floor = 0
+}
+
+//# address-hook(0x0400f0) end(0x040274)
+function void fn0400f0()
+{
+    u8 on_object_temp = u8[0xffffb02a] & char.flag.ON_OBJECT
+    base.fn0400f0()
+    if (is_ES && A1 == 0xffffb000 && hammer_drop_state && (u8[0xffffb02a] & char.flag.ON_OBJECT & ~on_object_temp))
+    {
+        hammer_drop_state = 0
+        hammer_crash = 0
+        playSound(0x5f)
+    }
 }

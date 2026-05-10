@@ -23,6 +23,71 @@
 					"1": "Toggle with down"
 				}
 			},
+			{
+				"InternalName": "wreckingballacceleration",
+				"DisplayName": "Wrecking Ball Acceleration",
+				"Variable": "super_ball_acceleration",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "+0",
+					"1": "+1",
+					"2": "+2",
+					"3": "+3"
+				}
+			},
+			{
+				"InternalName": "wreckingballmaxspeed",
+				"DisplayName": "Wrecking Ball maxspeed",
+				"Variable": "super_ball_max_speed",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "+0",
+					"1": "+1",
+					"2": "+2",
+					"3": "+3",
+					"4": "+3"
+				}
+			},
+			{
+				"InternalName": "hammerdropbouncyness",
+				"DisplayName": "Hammer Drop Bouncyness",
+				"Variable": "hammer_drop_bounce_force",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "+0",
+					"1": "+1",
+					"2": "+2",
+					"3": "+3"
+				}
+			},
+			{
+				"InternalName": "hammerdropmaxheight",
+				"DisplayName": "Hammer Drop Max Height",
+				"Variable": "hammer_drop_max_height",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "+0",
+					"1": "+1",
+					"2": "+2",
+					"3": "+3"
+				}
+			},
+			{
+				"InternalName": "hammerdropclampshspeed",
+				"DisplayName": "Hammer Drop Clamps H-Speed",
+				"Variable": "hammer_drop_speed_clamp",
+				"DefaultValue": "0",
+				"Options":
+				{
+					"0": "On (full)",
+					"1": "On (Half)",
+					"2": "Off"
+				}
+			},
 		]
 	}
 }

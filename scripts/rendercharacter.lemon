@@ -54,6 +54,14 @@ function string getCharacterSignpostSpriteKey(u8 character)
 	return base.getCharacterSignpostSpriteKey(character)
 }
 
+function string getCharacterBonusTextIcon(u8 character)
+{
+	if (is_ES && character == CHARACTER_BASE)
+		character = CHARACTER_KNUCKLES
+	
+	return base.getCharacterBonusTextIcon(character)
+}
+
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
 	if (isMighty())
@@ -138,7 +146,7 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 
 	if (!is_ES)
 		return base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
-		
+
 	if (A0 == 0xffffb000)
 	{
 		if (char.spindash == 0x80 || super_ball_state)
