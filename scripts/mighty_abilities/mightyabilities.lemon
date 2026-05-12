@@ -346,7 +346,7 @@ function void Character.CheckCollision()
 
 function void updateCharacterControlOnGround()
 {
-    if (isMighty() && super_ball_state && super_ball_style == 1)
+    if (isMighty() && super_ball_state && super_ball_style == 1 && char.rotation != 0x40 && char.rotation != 0xc0)
     {
         s16 dv = 0
         u16 increment = 0x10 * (1 + super_ball_acceleration)
@@ -359,7 +359,7 @@ function void updateCharacterControlOnGround()
         if (char.groundspeed > 0 && !(control.player1.state & CONTROL_LEFT))
             dv = (char.groundspeed <= max_speed) ? increment : -0xc
         else if (char.groundspeed < 0 && !(control.player1.state & CONTROL_RIGHT))
-            dv = (char.groundspeed <= max_speed) ? -increment : 0xc
+            dv = (char.groundspeed >= -max_speed) ? -increment : 0xc
         
         char.groundspeed += dv
     }
@@ -393,8 +393,8 @@ function void updateCharacterRollingOnGround()
         super_ball_state -= 1
     
     base.updateCharacterRollingOnGround()
-    if (abs(char.groundspeed) <= 0x300)
-        super_ball_state = 0
+    //if (abs(char.groundspeed) <= 0x300)
+    //    super_ball_state = 0
 }
 
 function void Character.updateUprightOnGroundInner()
@@ -419,7 +419,7 @@ function void Character.UpdateRollingSlopeEffect()
 {
     s16 groundspeed_temp = char.groundspeed
     base.Character.UpdateRollingSlopeEffect()
-    if (isMighty() && super_ball_state)
+    if (isMighty() && super_ball_state && char.rotation != 0x40 && char.rotation != 0xc0)
     {
         s16 diff = char.groundspeed - groundspeed_temp
         if ((char.groundspeed > 0) ^ (diff > 0))
@@ -500,6 +500,75 @@ function void Character.checkForWaterSurface()
 
     char.velocity.y = -0x400
     base.Character.checkForWaterSurface()
+}
+
+global bool break_wall
+
+function void fn021758()
+{
+    if (is_ES && (D6 & 0x10000) && !(u8[0xffffb037] & 0x40) && super_ball_state)
+    {
+        u8[0xffffb037] |= 0x40
+        base.fn021758()
+        u8[0xffffb037] &= ~0x40
+    }
+    else
+    {
+        base.fn021758()
+    }
+}
+
+//# address-hook(0x021568) end(0x021690)
+function void fn021568()
+{
+    if (is_ES && !super.active && super_ball_state && !(objA0.flags2a & object.flag.P1_PUSHING))
+    {
+        break_wall = true
+        base.fn021568()
+        super.active = 0
+        break_wall = false
+    }
+    else
+    {
+        base.fn021568()
+    }
+}
+
+function void fn01e006()
+{
+    if (break_wall && A1 == 0xffffb000)
+    {
+        u16 position_temp = objA1.position.y.u16
+        base.fn01e006()
+        if (objA1.position.y.u16 != position_temp)
+        {
+            objA1.position.y.u16 = position_temp
+            super.active = 1
+        }
+    }
+    else
+    {
+        base.fn01e006()
+    }
+}
+
+//# address-hook(0x01e042)
+function void fn01e042()
+{
+    if (break_wall && A1 == 0xffffb000)
+    {
+        u16 position_temp = objA1.position.x.u16
+        base.fn01e042()
+        if (objA1.position.x.u16 != position_temp)
+        {
+            objA1.position.x.u16 = position_temp
+            super.active = 1
+        }
+    }
+    else
+    {
+        base.fn01e042()
+    }
 }
 
 //# address-hook(0x031226) end(0x031458)
