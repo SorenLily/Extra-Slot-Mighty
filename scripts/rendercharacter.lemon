@@ -100,7 +100,14 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 		}
 		else
 		{
-			u8 sprite_index = getCharSpriteIndex()
+			u8 sprite_index = 0
+			if (global.zone_act == 0x0c00 && super.palettefx.state == 0xff)
+				sprite_index = 0xc8
+			else if (isInIdleAnimation())
+				sprite_index = idle_animation_sprites[idle_sprite]
+			else
+				sprite_index = getCharSpriteIndex()
+			
 			if (sprite_index == 0)
 				return "act_select_character_sprite_override"
 			else
@@ -113,6 +120,7 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 function u8 getCharSpriteIndex()
 {
 	u8 animationSprite = char.animation.sprite
+
 	if (animationSprite >= 0x01 && animationSprite <= 0x20)
 	{
 		// Walking animation
@@ -174,8 +182,11 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 				}
 			}
 			u8 speed_up_temp = char.bonus_effect & char.bonus.SPEED_UP
+			u8 flip_y_temp = char.render_flags & render_flag.FLIP_Y
 			char.bonus_effect |= char.bonus.SPEED_UP
+			char.render_flags &= ~render_flag.FLIP_Y
 			bool result = base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+			char.render_flags |= flip_y_temp
 			char.bonus_effect &= ~char.bonus.SPEED_UP
 			char.bonus_effect |= speed_up_temp
 

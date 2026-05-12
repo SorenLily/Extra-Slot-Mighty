@@ -32,11 +32,18 @@ global s16 velocity.y.copy
 // Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
+// --
+global u8 idle_animation
+global u8 idle_sprite
+
 // Flag to supress sounds. Only set in one place.
 global bool supress_sfx
 
 // Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
+
+constant array<u8> idle_animation_times = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130 }
+constant array<u8> idle_animation_sprites = { 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3 }
 
 constant u8 BOUNCY_BALL_MAX = 5
 constant u8 BOUNCY_BALL_WINDUP = 20
@@ -144,8 +151,7 @@ function void Character.BaseUpdate.Sonic()
         // Update custom animations.
         updateWinPose()
         updateSuperBallAnim()
-        //debugLog(char.animation.sprite)
-        //debugLog(char.animation.frame)
+        updateIdleAnimation()
     }
     return
 }
@@ -193,12 +199,17 @@ function void Character.UpdateControlInAir()
     {
         // Accelerate down rapidly during hammer drop, and increment hammer_drop_state.
         hammer_drop_state = min(0x80, hammer_drop_state + 1)
-        s16 dy = 0xd8
+        s16 dy = 0
+        if (abs(char.velocity.y) < 0x400)
+            dy = 0x120
+        else
+            dy = 0xd0
+
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
 
-        // Cancel any upward y-velocity the player has, and accelerate.
-        char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0x1000)
+        // Cancel any upward velocity the player has, and accelerate.
+        char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0xe00)
     }
     if (hammer_drop_rebound)
         hammer_drop_rebound--
@@ -225,14 +236,17 @@ function void mightyBounce()
     else
     {
         u16 max_force = 0xa80 + 0x180 * hammer_drop_max_height
-        s16 new_force = 0x780 + 0x80 * hammer_drop_bounce_force
         u8 df = 0x4 + hammer_drop_bounce_force
-        u16 len = (max_force - new_force) / df
-        
-        new_force += clamp(travel_dist - 0x40, 0, len / 4) * (df * 2)
-        new_force += clamp(travel_dist - (0x40 + len / 4), 0, len / 2) * df
-        //force = 0x780 + min((max(hammer_drop_state / 2, 6) - 6), 0x4) * 0xc0
-        force = new_force
+        force = 0x780 + 0x80 * hammer_drop_bounce_force
+        if (super.active)
+        {
+            max_force += 0x180
+            df += 1
+            force += 0x80
+        }
+        u16 len = (max_force - force) / df
+        force += clamp(travel_dist - 0x40, 0, len / 4) * (df * 2)
+        force += clamp(travel_dist - (0x40 + len / 4), 0, len / 2) * df
     }
     if (hammer_crash)
         char.velocity.x = 0
@@ -240,9 +254,6 @@ function void mightyBounce()
         char.velocity.x += (s32(lookupCos(reflected_angle)) * force) >> 8
     
     char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
-
-    if (global.inv_gravity)
-        char.velocity.y = -char.velocity.y
 
     if (char.flags & char.flag.UNDERWATER)
     {
@@ -263,7 +274,7 @@ function void Character.OnCollisionWithDynamicObject()
 {
     s16 velocity_temp.x = char.velocity.x
     s16 velocity_temp.y = char.velocity.y
-    if (isMighty() && (u32[A1] == 0x06da24 || u32[A1] == 0x06de40 || u32[A1] == 0x088572) && hammer_drop_state)
+    if (isMighty() && (u32[A1] == 0x06da24 || u32[A1] == 0x06de40 || u32[A1] == 0x088572 || u32[A1] == 0x07e768 || u32[A1] == 0x07f344 || u32[A1] == 0x0805ae) && hammer_drop_state)
     {
         hammer_drop_state = 0
         hammer_drop_rebound = 12
@@ -275,7 +286,20 @@ function void Character.OnCollisionWithDynamicObject()
         hammer_drop_rebound = 12
         char.velocity.y = clamp(char.velocity.y, -0x600, 0x600)
     }
-    base.Character.OnCollisionWithDynamicObject()
+    // If we're in the hammer drop state or a few frames after it has bounced...
+    if (isMighty() && u32[A1] != 0x08086c && (hammer_drop_state || (hammer_drop_rebound >= 6) || super_ball_state))
+    {
+        // Grant invincibility for collisions.
+        u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
+        char.bonus_effect |= char.bonus.INVINCIBLE
+        base.Character.OnCollisionWithDynamicObject()
+        char.bonus_effect &= ~char.bonus.INVINCIBLE
+        char.bonus_effect |= invincible_flag_temp
+    }
+    else
+    {
+       base.Character.OnCollisionWithDynamicObject() 
+    }
     // If we are in hammer drop state and we didn't get HURT...
     if (isMighty() && hammer_drop_state && char.base_state != base_state.HURT)
     {
@@ -291,20 +315,7 @@ function void Character.CheckCollisionsWithDynamicObjects_partial()
     if (isMighty() && super_ball_state)
         destroyObstacles()
     
-    // If we're in the hammer drop state or a few frames after it has bounced...
-    if (isMighty() && (hammer_drop_state || (hammer_drop_rebound >= 6) || super_ball_state))
-    {
-        // Grant invincibility for collisions.
-        u8 invincible_flag_temp = char.bonus_effect & char.bonus.INVINCIBLE
-        char.bonus_effect |= char.bonus.INVINCIBLE
-        base.Character.CheckCollisionsWithDynamicObjects_partial()
-        char.bonus_effect &= ~char.bonus.INVINCIBLE
-        char.bonus_effect |= invincible_flag_temp
-    }
-    else
-    {
-        base.Character.CheckCollisionsWithDynamicObjects_partial()
-    }
+    base.Character.CheckCollisionsWithDynamicObjects_partial()
 }
 
 //# address-hook(0x011eec) end(0x011fd4)
@@ -340,9 +351,14 @@ function void updateCharacterControlOnGround()
         s16 dv = 0
         u16 increment = 0x10 * (1 + super_ball_acceleration)
         u16 max_speed = 0x800 + (0x100 * super_ball_max_speed) - increment
+        if (super.active)
+        {
+            increment += 0x18
+            max_speed += 0x180
+        }
         if (char.groundspeed > 0 && !(control.player1.state & CONTROL_LEFT))
             dv = (char.groundspeed <= max_speed) ? increment : -0xc
-        else if (char.groundspeed < 0 && !(control.player1.state & CONTROL_LEFT))
+        else if (char.groundspeed < 0 && !(control.player1.state & CONTROL_RIGHT))
             dv = (char.groundspeed <= max_speed) ? -increment : 0xc
         
         char.groundspeed += dv
@@ -411,6 +427,20 @@ function void Character.UpdateRollingSlopeEffect()
     }
 }
 
+function void setSpeedCapProperties(u32 address, bool isSuperActive)
+{
+    if (isMighty() && isSuperActive)
+    {
+        char.character = CHARACTER_KNUCKLES
+        base.setSpeedCapProperties(address, isSuperActive)
+        char.character = CHARACTER_BASE
+    }
+    else
+    {
+        base.setSpeedCapProperties(address, isSuperActive)
+    }
+}
+
 function void fn00730c()
 {
     // Super ball state ignores sand slides in SOZ.
@@ -441,9 +471,66 @@ function void fn040c2a()
 function void Character.GettingHurt()
 {
     if (is_ES && A0 == 0xffffb000 && hammer_drop_rebound_protection && !(char.protection_flag & 0x80))
+    {
         char.protection_flag |= 0x80
+        base.Character.GettingHurt()
+        char.protection_flag &= ~0x80
+    }
+    else
+    {
+        base.Character.GettingHurt()
+    }
+}
 
-    base.Character.GettingHurt()
+function void Character.checkForWaterSurface()
+{
+    if (!isMighty() || !level.water_present || char.base_state == base_state.HURT)
+    {
+        base.Character.checkForWaterSurface()
+        return
+    }
+
+	bool wasUnderwaterBefore = (char.flags & char.flag.UNDERWATER) != 0
+	bool isUnderwaterNow = (s16(char.position.y.u16) > s16(water.height.current))
+	if (isUnderwaterNow == wasUnderwaterBefore || (!wasUnderwaterBefore) || char.velocity.y >= -0x400)
+    {
+        base.Character.checkForWaterSurface()
+        return
+    }
+
+    char.velocity.y = -0x400
+    base.Character.checkForWaterSurface()
+}
+
+//# address-hook(0x031226) end(0x031458)
+function void fn031226()
+{
+    // HCZ conveyor belt
+    if (!is_ES || A1 != 0xffffb000 || u8[A2] != 0 || !hammer_drop_state)
+    {
+        base.fn031226()
+        return
+    }
+
+    // Replicate all the conditions for grabbing onto the conveyor belt.
+    if (objA1.position.x.u16 >= u16[A0 + 0x40] && objA1.position.x.u16 < u16[A0 + 0x42])
+    {
+        bool upperBelt = (u16[A1 + 0x1c] == 1)
+		u16 py = objA0.position.y.u16 + (upperBelt ? -0x14 : 0x14)
+
+        if (objA1.position.y.u16 > py && objA1.position.y.u16 <= py + 0x10)
+		{
+			if (debug_mode.state == 0 && u8[A1 + 0x05] < base_state.HURT && u8[A1 + 0x2e] == 0)
+            {
+                objA1.position.y.u16 += 0x40
+                base.fn031226()
+                objA1.position.y.u16 -= 0x40
+                return
+            }
+        }
+    }
+
+    base.fn031226()
 }
 
 //////////////////////////
@@ -487,10 +574,38 @@ function void updateSuperBallAnim()
     super_ball_animation_state &= 0x3f
 }
 
+// Helper function
+function bool isInIdleAnimation()
+{
+    return (char.animation.sprite == 0xd9 || (char.animation.sprite >= 0xad && char.animation.sprite <= 0xb3) || (char.animation.sprite >= 0xbb && char.animation.sprite <= 0xc0))
+}
+
+// Helper function
+function void updateIdleAnimation()
+{
+    if (isInIdleAnimation())
+    {
+        idle_animation += 1
+    }
+    else
+    {
+        idle_animation = 0
+        idle_sprite = 0
+    }
+        
+    if (idle_animation >= idle_animation_times[idle_sprite])
+    {
+        idle_sprite += 1 
+    }
+    idle_animation %= idle_animation_times[idle_animation_times.length() - 1]
+    idle_sprite %= (idle_animation_sprites.length())
+}
+
 //# address-hook(0x012600) end(0x01286c)
 //# translated(0x012a2a) end(0x012a6e)
 function void UpdateSonicAnimation()
 {
+    // Force the game to use Sonic's base spritesheet even during the super form.
     if (isMighty() && super.palettefx.state == 0xff)
     {
         u8 super_temp = super.active

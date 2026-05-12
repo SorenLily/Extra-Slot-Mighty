@@ -1,77 +1,21 @@
 //# address-hook(0x022f98) end(0x02304a)
 function void SpringVertical.ApplyToCharacter()
 {
-    if (super_ball_state)
+    base.SpringVertical.ApplyToCharacter()
+    if (hammer_drop_state && A1 == 0xffffb000 && !global.inv_gravity)
     {
-        s16 groundspeed_temp = objA1.groundspeed
-        base.SpringVertical.ApplyToCharacter()
-        objA1.groundspeed = groundspeed_temp
+        objA1.velocity.y -= (objA1.flags2a & char.flag.UNDERWATER) ? 0x180 : 0x300
+        objA1.velocity.y = max(objA1.velocity.y, -0x1000)
     }
-    else
-    {
-        base.SpringVertical.ApplyToCharacter()
-    }   
 }
 
 //# address-hook(0x0233ca) end(0x0233d4)
 function void SpringVerticalFlipped.ApplyToCharacter()
 {
-    if (super_ball_state)
+    base.SpringVerticalFlipped.ApplyToCharacter()
+    if (hammer_drop_state && A1 == 0xffffb000 && global.inv_gravity)
     {
-        s16 groundspeed_temp = objA1.groundspeed
-        base.SpringVerticalFlipped.ApplyToCharacter()
-        objA1.groundspeed = groundspeed_temp
+        objA1.velocity.y += (objA1.flags2a & char.flag.UNDERWATER) ? 0x180 : 0x300
+        objA1.velocity.y = min(objA1.velocity.y, 0x1000)
     }
-    else
-    {
-        base.SpringVerticalFlipped.ApplyToCharacter()
-    }
-}
-
-//# address-hook(0x0231be) end(0x023266)
-function void fn0231be()
-{
-    // Called from SpringHorizontal.ApplyToCharacter().
-    if (super_ball_state)
-    {
-        s16 groundspeed_temp = objA1.groundspeed
-        base.fn0231be()
-        //objA1.groundspeed = groundspeed_temp
-    }
-    else
-    {
-        base.fn0231be()
-    }  
-}
-
-//# address-hook(0x0234e6) end(0x0235cc)
-//# alias(fn0234e6) deprecated
-function void SpringDiagonal.ApplyToCharacter()
-{
-    if (super_ball_state)
-    {
-        s16 groundspeed_temp = objA1.groundspeed
-        base.SpringDiagonal.ApplyToCharacter()
-        objA1.groundspeed = groundspeed_temp
-    }
-    else
-    {
-        base.SpringDiagonal.ApplyToCharacter()
-    }  
-}
-
-//# address-hook(0x023624) end(0x0236e4)
-//# alias(fn023624) deprecated
-function void SpringDiagonalFlipped.ApplyToCharacter()
-{
-    if (super_ball_state)
-    {
-        s16 groundspeed_temp = objA1.groundspeed
-        base.SpringDiagonalFlipped.ApplyToCharacter()
-        objA1.groundspeed = groundspeed_temp
-    }
-    else
-    {
-        base.SpringDiagonalFlipped.ApplyToCharacter()
-    } 
 }
