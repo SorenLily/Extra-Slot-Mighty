@@ -376,6 +376,7 @@ function u32 horizontalBurstPattern(s16 x_offset, s16 y_offset, s16 sprite_cente
 ///  Mighty Destroy Obstacles  ///
 //////////////////////////////////
 
+// Helper function
 function void destroyObstacles()
 {
 	// This is a heavily modified version of Character.CheckCollisionsWithDynamicObjects()
@@ -410,13 +411,21 @@ function void destroyObstacles()
 			num_interactibles -= 1
 			interactible_index += 2
 			// Interactibles with no collision attribute data can't collide.
-			if (objA1.collision_attributes == 0)
+			// Except static ICZ spikes...for some reason.
+			if (objA1.collision_attributes == 0 && u32[A1] != 0x8b228)
 				continue
 		}
-
-        // Only proceed with objects that we want Mighty's superball state to break.
-        if (!isBreakableObstacle(u32[A1]))
-            continue
+		
+		// Only proceed with objects that we want Mighty's superball or hammer crash state to break.
+		if (hammer_crash)
+		{
+			if (!isBreakableObstacle.HD(u32[A1]))
+				continue
+		}
+        else if (super_ball_state && !isBreakableObstacle.WB(u32[A1]))
+		{
+			continue
+		}
         
 		// Get the (unsigned) distances between the character and object.
 		u16 dx = abs(s16(objA0.position.x.u16 - objA1.position.x.u16))
@@ -424,7 +433,7 @@ function void destroyObstacles()
 		u8 other_hitbox.x = 0
 		u8 other_hitbox.y = 0
 		// Figure out what the hitbox size is.
-		if (is_interactible)
+		if (is_interactible && objA1.collision_attributes != 0)
 		{
 			// This is how the game normally accesses the hitbox sizes of interactibles.
 			u32 collision_size_lookup = 0x00ff62 + (objA1.collision_attributes & collision_attributes.size) * 2
@@ -441,7 +450,7 @@ function void destroyObstacles()
 		if (dx < (objA0.hitbox_extends.x + other_hitbox.x + 4) && dy < (objA0.hitbox_extends.y + other_hitbox.y + 4))
 		{
             u8 burst_type = 0
-            if (abs(objA0.velocity.x) >= 0x200)
+            if (!hammer_crash && abs(objA0.velocity.x) >= 0x200)
                 burst_type = (objA0.velocity.x < 0) ? 1 : 2
 			tagObjectForVdpBurst(A1, burst_type)
 			// If the character is standing on this object...
@@ -451,18 +460,47 @@ function void destroyObstacles()
                 char.flags &= ~char.flag.ON_OBJECT
                 u16[A0 + 0x42] = 0
             }
+
+			if (objA1.respawn_entry)
+			{
+				u32 respawn_address = 0xffff0000 + objA1.respawn_entry
+				u8[respawn_address] &= ~0x80
+			}
+
+			// Special handling for HCZ platforms with Blastoids on them
+			if (u32[A1] == 0x20af6 && objA1.value3a == 0)
+			{
+				for (u32 i = 0xffffb128; i <= 0xffffcae2; i += 0x4a)
+				{
+					if (u32[i] != 0x8792e)
+						continue
+					
+					if ((u8[A1 + 0x40] & 0xf) == (u8[i + 0x2c] & 0xf))
+					{
+						if (u8[i + 0x2a] & 0x04)
+						{
+							u32 respawn_address = 0xffff0000 + u16[i + 0x3c]
+							u8[respawn_address] &= ~(1 << u8[i + 0x3b])
+						}
+						tagObjectForVdpBurst(i, burst_type)
+						unloadObjectAt(i)
+						break
+					}
+				}
+			}
             unloadObjectAt(A1)
             playSound(SFX_COLLAPSE)
 		}
 	}
 }
 
-function bool isBreakableObstacle(u32 update_address)
+// Helper function
+function bool isBreakableObstacle.WB(u32 update_address)
 {
     bool result = false
-    for (u8 i = 0; i < obstacle_addresses.length(); i += 1)
+    for (u8 i = 0; i < WB_obstacle_addresses.length(); i += 1)
     {
-        if (update_address == obstacle_addresses[i])
+        if (update_address == WB_obstacle_addresses[i])
         {
             result = true
             break
@@ -471,7 +509,22 @@ function bool isBreakableObstacle(u32 update_address)
     return result
 }
 
-constant array<u32> obstacle_addresses =
+// Helper function
+function bool isBreakableObstacle.HD(u32 update_address)
+{
+    bool result = false
+    for (u8 i = 0; i < HD_obstacle_addresses.length(); i += 1)
+    {
+        if (update_address == HD_obstacle_addresses[i])
+        {
+            result = true
+            break
+        }
+    }
+    return result
+}
+
+constant array<u32> WB_obstacle_addresses =
 {
     0x24090, // Floor Spikes
     0x240e2, // Wall Spikes
@@ -493,11 +546,10 @@ constant array<u32> obstacle_addresses =
     0x43c88,
     0x02927c, // Spike crusher
     0x8b198, // Ice Spikes
-    0x8b1ae,
-    0x8b1d4,
-    0x8b1fa,
-    0x8b2da,
-    0x8b330,
+    0x8b1ae, // ICZ big spike (in ceiling)
+    0x8b1d4, // ICZ big spike (about to fall)
+    0x8b1fa, // ICZ big spike (falling)
+	0x8b228, // ICZ big spike (on ground)
     0x8b2a4,
     0x8b2ee,
     0x8b310,
@@ -505,4 +557,15 @@ constant array<u32> obstacle_addresses =
     0x85140,
     0x8b4ec,
     0x8b384, // Ice block
+	0x8faec, // LRZ ivamadoki
+}
+
+constant array<u32> HD_obstacle_addresses =
+{
+	0x20002, // AIZ rocks
+	0x20af6, // HCZ Platforms (with shooters on top)
+	0x1f3ca, // HCZ-2 Square platforms
+	0x20594,
+	0x2ae70,
+	0x2aeb4,
 }

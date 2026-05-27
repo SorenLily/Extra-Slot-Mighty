@@ -68,7 +68,9 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 	{
 		string str = ""
 		if (char.state == char.state.WIN_POSE)
+		{
 			return stringformat("mighty_win_pose_0x%02x", mighty_wp_frame)
+		}
 		else if (hammer_drop_rebound >= 7)
 		{
 			if (hammer_drop_rebound == 12)
@@ -98,13 +100,17 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			str += stringformat("0x%02x", (super_ball_animation_state >> 4))
 			return str
 		}
+		else if (isInIdleAnimation())
+		{
+			str += "mighty_idle_"
+			str += stringformat("0x%02x", idle_animation_sprites[idle_sprite])
+			return str
+		}
 		else
 		{
 			u8 sprite_index = 0
 			if (global.zone_act == 0x0c00 && super.palettefx.state == 0xff)
 				sprite_index = 0xc8
-			else if (isInIdleAnimation())
-				sprite_index = idle_animation_sprites[idle_sprite]
 			else
 				sprite_index = getCharSpriteIndex()
 			
@@ -113,6 +119,10 @@ function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationS
 			else
 				return stringformat("character_mighty_0x%02x", sprite_index)
 		}
+	}
+	else if (is_ES && A0 == 0xffffb000 && u32[A0] == 0x04b958)
+	{
+		return stringformat("character_mighty_0x%02x", char.animation.sprite)
 	}
 	return base.Standalone.getModdedAnimationSpriteKey(character, animationSpriteEx)
 }

@@ -21,6 +21,8 @@ global u8 hammer_drop_rebound_protection
 // --
 global u8 super_ball_state
 // --
+global bool keep_super_ball
+// --
 global u8 super_ball_animation_state
 // State for blocking damage from spike collisions.
 global u8 block_spikes
@@ -42,8 +44,8 @@ global bool supress_sfx
 // Frame counts for the win pose animation.
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
 
-constant array<u8> idle_animation_times = { 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130 }
-constant array<u8> idle_animation_sprites = { 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3 }
+constant array<u8> idle_animation_times =   {  8,  8, 12, 120, 10, 24, 10, 24, 10, } //10, 10, 10, 10, }
+constant array<u8> idle_animation_sprites = {  1,  2,  3,   4,  5,  6,  7,  6,  5, }// 4,  8,  9, 10, }
 
 constant u8 BOUNCY_BALL_MAX = 5
 constant u8 BOUNCY_BALL_WINDUP = 20
@@ -51,7 +53,12 @@ constant u8 BOUNCY_BALL_WINDUP = 20
 // Helper function
 function bool isMighty()
 {
-    return (is_ES && (A0 == 0xffffb000))
+    return (is_ES && (A0 == 0xffffb000) && u32[A0] == 0x010a94)
+}
+
+function bool isMightyA1()
+{
+    return (is_ES && (A1 == 0xffffb000) && u32[A1] == 0x010a94)
 }
 
 // Helper function
@@ -91,7 +98,7 @@ function bool isFloating()
 
 function u16 hypot(s16 x, s16 y)
 {
-    return s16(sqrt(square(s32(x)) + square(s32(y))))
+    return u16(sqrt(square(s32(x)) + square(s32(y))))
 }
 
 function void Character.Initialization.shared(u8 character)
@@ -103,6 +110,7 @@ function void Character.Initialization.shared(u8 character)
     hammer_drop_starting_point = 0
     hammer_drop_rebound_protection = 0
     super_ball_state = 0
+    keep_super_ball = 0
     super_ball_animation_state = 0
     block_spikes = 0
     velocity.x.copy = 0
@@ -119,41 +127,45 @@ function void Character.BaseUpdate.Sonic()
     if (!isMighty())
     {
         base.Character.BaseUpdate.Sonic()
+        return
     }
-    else
+
+    // These are all cases where we do not want Mighty's abilities to work or progress:
+    // 1) If Mighty is HURT or DIED,
+    // 2) Or if Mighty is being controlled by an object instead of controlled normally,
+    // 3) Or if Mighty is not in the air (all his abilities are aerial),
+    // 4) Or if Mighty is being lifted by "fans" (see isFloating() for more details),
+    // Then...
+    if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating() || char.state == char.state.LIFTED)
     {
-        // These are all cases where we do not want Mighty's abilities to work or progress:
-        // 1) If Mighty is HURT or DIED,
-        // 2) Or if Mighty is being controlled by an object instead of controlled normally,
-        // 3) Or if Mighty is not in the air (all his abilities are aerial),
-        // 4) Or if Mighty is being lifted by "fans" (see isFloating() for more details),
-        // Then...
-        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE) || !(char.flags & char.flag.IN_AIR) || isFloating())
-        {
-            // Reset ability states.
-            hammer_drop_state = 0
-            hammer_drop_rebound = 0
-            hammer_drop_rebound_protection = 0
-        }
-
-        if (char.base_state != base_state.NORMAL || (char.control_flags & control_flag.DISABLE_UPDATE)) //|| (!hammer_drop_state && ((!(char.flags & char.flag.IN_AIR) && abs(char.groundspeed) < 0x300)))) //|| ((char.flags & char.flag.IN_AIR) && ((abs(stored_velocity) + abs(char.velocity.x) + abs(char.velocity.y)) < 0x300)))))
-        {
-            super_ball_state = 0
-            hammer_crash_lock = 0
-        }
-        base.Character.BaseUpdate.Sonic()
-        if (super_ball_state && !(char.flags & char.flag.ROLLING))
-            super_ball_state = 0
-
-        block_spikes = 0
-        if (hammer_drop_rebound_protection)
-            hammer_drop_rebound_protection -= 1
-        // Update custom animations.
-        updateWinPose()
-        updateSuperBallAnim()
-        updateIdleAnimation()
+        // Reset ability states.
+        hammer_drop_state = 0
+        hammer_crash = 0
+        hammer_drop_rebound = 0
+        hammer_drop_rebound_protection = 0
     }
-    return
+
+    if (char.base_state != base_state.NORMAL || char.state == char.state.LIFTED || isFloating() || ((char.control_flags & (control_flag.DISABLE_UPDATE | control_flag.DISABLE_ANIMATION)) && !keep_super_ball))
+    {
+        super_ball_state = 0
+        hammer_crash_lock = 0
+    }
+
+    if (char.base_state != base_state.NORMAL)
+    {
+        keep_super_ball = 0
+    }
+    base.Character.BaseUpdate.Sonic()
+    if (super_ball_state && !(char.flags & char.flag.ROLLING))
+        super_ball_state = 0
+
+    block_spikes = 0
+    if (hammer_drop_rebound_protection)
+        hammer_drop_rebound_protection -= 1
+    // Update custom animations.
+    updateWinPose()
+    updateSuperBallAnim()
+    updateIdleAnimation()
 }
 
 function void SonicPressedJumpInMidAir()
@@ -163,7 +175,6 @@ function void SonicPressedJumpInMidAir()
         base.SonicPressedJumpInMidAir() 
         return
     }
-
     // Literally nothing that Sonic's jump function does can be kept for Mighty
     // except for clearing these values, so this hook does not call the base.
     char.rotation.both = 0
@@ -171,12 +182,19 @@ function void SonicPressedJumpInMidAir()
 
     // Start the hammer drop.
     // Note: it is possible to be both in the air and on an object in some specific circumstances.
-    if (!hammer_drop_state && !hammer_drop_rebound && !hammer_crash_lock && !(char.flags & char.flag.ON_OBJECT))
+    if (!hammer_drop_state && !hammer_drop_rebound && !hammer_crash_lock && !(char.flags & char.flag.ON_OBJECT) && char.state != char.state.LIFTED)
     {
         hammer_drop_state = 1
         hammer_drop_starting_point = char.position.y.u16
         if (control.player1.state & CONTROL_DOWN)
+        {
             hammer_crash = 1
+            super_ball_state = 1
+        }
+        else
+        {
+            super_ball_state = 0
+        }
         
         if (hammer_drop_speed_clamp == 0)
             char.velocity.x >>= 1
@@ -184,6 +202,17 @@ function void SonicPressedJumpInMidAir()
             char.velocity.x -= char.velocity.x >> 2
     }
     return
+}
+
+//# address-hook(0x01459e) end(0x014630)
+function void fn01459e()
+{
+    // MGZ-2 boss: Tails starts carrying player
+    base.fn01459e()
+    // Apparently this flag never gets cleared in this section, which leads to an annoying edge case.
+    // So just clear it. The object the player was standing on is long gone anyway.
+    if (isMightyA1())
+        objA1.flags2a &= ~char.flag.ON_OBJECT
 }
 
 //# address-hook(0x01164e) end(0x0116dc)
@@ -219,13 +248,25 @@ function void Character.UpdateControlInAir()
 function void mightyBounce()
 {
     s16 travel_dist = (char.position.y.u16 - hammer_drop_starting_point)
+    // There's a spot in SOZ-2 where you can hammer drop through a level-wrap.
+    if (travel_dist < -(level.height.bitmask >> 1))
+        travel_dist = (char.position.y.u16 + level.height.bitmask) - hammer_drop_starting_point
+
+    if (global.inv_gravity)
+        travel_dist = -travel_dist
+    
+    if (travel_dist)
     s16 vx = velocity.x.copy
     s16 vy = velocity.y.copy
     velocity.x.copy = 0
     velocity.y.copy = 0
 
     // The angle to bounce toward.
-    u8 reflected_angle = char.rotation - 0x40
+    u8 reflected_angle = char.rotation
+    if (char.rotation < 0x10 || char.rotation > 0xf0)
+        reflected_angle = 0
+    reflected_angle -= 0x40
+
     s16 force = 0
 
     if (hammer_crash)
@@ -269,12 +310,36 @@ function void mightyBounce()
     char.on_convex_surface = 0
 }
 
+constant array<u32> bossesToBounceOn =
+{
+    0x6923e, // AIZ-2
+    0x6af0c, // HCZ-2
+    0x6da24,
+    0x6de40,
+    0x6e4c6,
+    0x711be, // ICZ-1
+    0x88572,
+    0x7e768,
+    0x7f344,
+    0x805ae,
+}
+
+function bool shouldBounceOnCollision(u32 update_address)
+{
+    for (u8 i = 0; i < bossesToBounceOn.length(); i += 1)
+    {
+        if (update_address == bossesToBounceOn[i])
+            return true
+    }
+    return false
+}
+
 //# address-hook(0x00ffd4) end(0x010214)
 function void Character.OnCollisionWithDynamicObject()
 {
     s16 velocity_temp.x = char.velocity.x
     s16 velocity_temp.y = char.velocity.y
-    if (isMighty() && (u32[A1] == 0x06da24 || u32[A1] == 0x06de40 || u32[A1] == 0x088572 || u32[A1] == 0x07e768 || u32[A1] == 0x07f344 || u32[A1] == 0x0805ae) && hammer_drop_state)
+    if (isMighty() && hammer_drop_state && shouldBounceOnCollision(u32[A1]))
     {
         hammer_drop_state = 0
         hammer_drop_rebound = 12
@@ -312,7 +377,7 @@ function void Character.OnCollisionWithDynamicObject()
 //# address-hook(0x00ff06) end(0x00ff5e)
 function void Character.CheckCollisionsWithDynamicObjects_partial()
 {
-    if (isMighty() && super_ball_state)
+    if (isMighty() && (hammer_crash || super_ball_state))
         destroyObstacles()
     
     base.Character.CheckCollisionsWithDynamicObjects_partial()
@@ -348,8 +413,9 @@ function void updateCharacterControlOnGround()
 {
     if (isMighty() && super_ball_state && super_ball_style == 1 && char.rotation != 0x40 && char.rotation != 0xc0)
     {
+        // Super Ball acceleration
         s16 dv = 0
-        u16 increment = 0x10 * (1 + super_ball_acceleration)
+        u16 increment = 0x18 + 0x10 * (super_ball_acceleration)
         u16 max_speed = 0x800 + (0x100 * super_ball_max_speed) - increment
         if (super.active)
         {
@@ -393,8 +459,6 @@ function void updateCharacterRollingOnGround()
         super_ball_state -= 1
     
     base.updateCharacterRollingOnGround()
-    //if (abs(char.groundspeed) <= 0x300)
-    //    super_ball_state = 0
 }
 
 function void Character.updateUprightOnGroundInner()
@@ -441,10 +505,14 @@ function void setSpeedCapProperties(u32 address, bool isSuperActive)
     }
 }
 
+//////////////////////////////
+// OBJECT-SPECIFIC HANDLING //
+//////////////////////////////
+
 function void fn00730c()
 {
     // Super ball state ignores sand slides in SOZ.
-    if (A1 == 0xffffb000 && is_ES && super_ball_state && !(u8[A1 + 0x2a] & char.flag.ON_OBJECT))
+    if (isMightyA1() && super_ball_state && !(u8[A1 + 0x2a] & char.flag.ON_OBJECT))
     {
         u8 flags_temp = u8[A1 + 0x2a]
         u8[A1 + 0x2a] |= char.flag.IN_AIR
@@ -470,7 +538,7 @@ function void fn040c2a()
 //# address-hook(0x010294) end(0x010364)
 function void Character.GettingHurt()
 {
-    if (is_ES && A0 == 0xffffb000 && hammer_drop_rebound_protection && !(char.protection_flag & 0x80))
+    if (isMighty() && hammer_drop_rebound_protection && !(char.protection_flag & 0x80))
     {
         char.protection_flag |= 0x80
         base.Character.GettingHurt()
@@ -492,7 +560,7 @@ function void Character.checkForWaterSurface()
 
 	bool wasUnderwaterBefore = (char.flags & char.flag.UNDERWATER) != 0
 	bool isUnderwaterNow = (s16(char.position.y.u16) > s16(water.height.current))
-	if (isUnderwaterNow == wasUnderwaterBefore || (!wasUnderwaterBefore) || char.velocity.y >= -0x400)
+	if (isUnderwaterNow == wasUnderwaterBefore || (!wasUnderwaterBefore) || char.velocity.y >= -0x400 || char.velocity.y <= -0x800)
     {
         base.Character.checkForWaterSurface()
         return
@@ -571,11 +639,27 @@ function void fn01e042()
     }
 }
 
+//# address-hook(0x01fd08) end(0x01ff1a)
+function void fn01fd08()
+{
+    if (is_ES && !super.active && super_ball_state && !(objA0.flags2a & object.flag.P1_PUSHING))
+    {
+        break_wall = true
+        base.fn01fd08()
+        super.active = 0
+        break_wall = false
+    }
+    else
+    {
+        base.fn01fd08()
+    }
+}
+
 //# address-hook(0x031226) end(0x031458)
 function void fn031226()
 {
     // HCZ conveyor belt
-    if (!is_ES || A1 != 0xffffb000 || u8[A2] != 0 || !hammer_drop_state)
+    if (!isMightyA1() || u8[A2] != 0 || !hammer_drop_state)
     {
         base.fn031226()
         return
@@ -601,6 +685,173 @@ function void fn031226()
 
     base.fn031226()
 }
+
+// HCZ corkscrewslide
+
+//# address-hook(0x039102) end(0x039206)
+function void fn039102()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn039102()
+    if (isMightyA1() && (control_flags_temp == 0) && (u8[A1 + 0x2e] != 0))
+        keep_super_ball = true
+}
+
+//# address-hook(0x039208) end(0x03925a)
+function void fn039208()
+{
+    if (!isMightyA1())
+    {
+        base.fn039208()
+        return
+    }
+    base.fn039208()
+    if (super_ball_state && abs(s16[A1 + 0x1c]) < 0x800)
+    {
+        s16[A1 + 0x1c] = (s16[0x1c] > 0) ? min(s16[A1 + 0x1c] + 0x20, 0xa00) : max(s16[A1 + 0x1c] - 0x20, -0xa00)
+    }
+}
+
+//# address-hook(0x0390c2) end(0x0390f0)
+function void fn0390c2()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn0390c2()
+    if (isMightyA1() && control_flags_temp != 0 && u8[A1 + 0x2e] == 0)
+        keep_super_ball = false
+}
+
+// LBZ Booster Tube
+
+//# address-hook(0x029620) end(0x0296d2)
+function void fn029620()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn029620()
+    if (isMightyA1() && (control_flags_temp == 0) && (u8[A1 + 0x2e] != 0))
+        keep_super_ball = true
+}
+
+//# address-hook(0x02978e) end(0x0297a0)
+function void fn02978e()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn02978e()
+    if (isMightyA1() && control_flags_temp != 0 && u8[A1 + 0x2e] == 0)
+        keep_super_ball = false
+}
+
+//# address-hook(0x028de4) end(0x028e70)
+function void SpinLauncher.Update()
+{
+    // LBZ Spin Launcher
+    s16 velocity_temp = s16[0xffffb01a]
+    u8 flags_temp = objA0.flags2a & object.flag.P1_ON_OBJECT
+    base.SpinLauncher.Update()
+    if (is_ES && flags_temp == (objA0.flags2a & object.flag.P1_ON_OBJECT) && (velocity_temp > 0) && s16[0xffffb01a] != velocity_temp)
+        s16[0xffffb01a] = velocity_temp
+}
+
+//# address-hook(0x08dc6e) end(0x08dcc4)
+function void fn08dc6e()
+{
+    // MHZ Mushmeanie collision logic
+    s16 velocity_temp.x = s16[0xffffb018]
+    s16 velocity_temp.y = s16[0xffffb01a]
+    s16 groundspeed_temp = s16[0xffffb01c]
+    base.fn08dc6e()
+    if (isMightyA1() && super_ball_state && (objA1.velocity.x != velocity_temp.x || objA1.velocity.y != velocity_temp.y))
+    {
+        objA1.velocity.x = velocity_temp.x
+        objA1.velocity.y = velocity_temp.y
+        objA1.groundspeed = groundspeed_temp
+    }
+}
+
+//# address-hook(0x03ec66) end(0x03ed08)
+function void fn03ec66()
+{
+    // MHZ Sticky Vine (pull the player and check for release)
+    if (isMightyA1() && super_ball_state)
+    {
+        if (u8[A0 + 0x3d] == 0)
+        {
+            u8[A0 + 0x3d] = 1
+            u8[A0 + 0x3e] = 0x10
+        }
+        s16 speed_temp = (objA1.flags2a & char.flag.IN_AIR) ? objA1.velocity.x : objA1.groundspeed
+        base.fn03ec66()
+        if (objA1.flags2a & char.flag.IN_AIR)
+            objA1.velocity.x = speed_temp
+        else
+            objA1.groundspeed = speed_temp
+
+        return
+    }
+    base.fn03ec66()
+}
+
+global bool no_recurse
+
+//# address-hook(0x03c636) end(0x03c6b6)
+function void fn03c636()
+{
+    // FBZ Parachute Bomb Door
+    if (no_recurse)
+    {
+        base.fn03c636()
+        return
+    }
+
+    s16 velocity_temp = s16[0xffffb01a]
+    u8 flags_temp = objA0.flags2a & object.flag.P1_ON_OBJECT
+    u32 other_address = 0xffff0000 + u16[A0 + 0x3c]
+    base.fn03c636()
+    if (is_ES && hammer_crash && (objA0.flags2a & object.flag.P1_ON_OBJECT) && !(flags_temp & object.flag.P1_ON_OBJECT))
+    {
+        u8[other_address + 0x40] = 0
+        s16[0xffffb01a] = velocity_temp
+        store_bounce = 0
+        no_recurse = true
+        fn03c636()
+        no_recurse = false
+    }
+}
+
+/*
+// LRZ.DashElevator.Update()
+//# address-hook(0x042f78) end(0x043016)
+function void fn042f78()
+{
+    u8 flags_temp = (objA0.flags2a & object.flag.P1_ON_OBJECT)
+    u8 super_ball_temp = super_ball_state
+    base.fn042f78()
+    if ((objA0.flags2a & object.flag.P1_ON_OBJECT) && !flags_temp && super_ball_temp && !super_ball_state)
+    {
+        super_ball_state = 1
+        u32 a0_temp = A0
+        A0 = 0xffffb000
+        setRollingState()
+        A0 = a0_temp
+    }
+}
+
+//# address-hook(0x04301c) end(0x043094)
+function void fn04301c()
+{
+    // LRZ Dash Elevator
+    if (isMightyA1() && super_ball_state && (u8[A2] == 0) && (objA0.flags2a & (1 << D6.u8)))
+    {
+        u8 state_temp = objA1.state
+        objA1.state = char.state.SPINDASH
+        base.fn04301c()
+        objA1.state = state_temp
+        return
+    }
+
+    base.fn04301c()
+}
+*/
 
 //////////////////////////
 ///     ANIMATIONS     ///
@@ -631,14 +882,15 @@ function void updateWinPose()
 // Helper function
 function void updateSuperBallAnim()
 {
-    if (char.spindash == 0x80)
-    {
-        super_ball_animation_state += min((char.spindash_charge >> 7), 0xc)
-        super_ball_animation_state = super_ball_animation_state & 0x3f
-    }
-
     if (super_ball_state)
-        super_ball_animation_state += 0xc
+    {
+        u8 df = 6
+        if (!(char.flags & char.flag.IN_AIR))
+            df += min(max((abs(char.groundspeed)) >> 9, 1) - 1, 8)
+        else
+            df += min(max((hypot(char.velocity.x, char.velocity.y)) >> 9, 1) - 1, 8)
+        super_ball_animation_state += df
+    } 
 
     super_ball_animation_state &= 0x3f
 }
@@ -664,9 +916,13 @@ function void updateIdleAnimation()
         
     if (idle_animation >= idle_animation_times[idle_sprite])
     {
-        idle_sprite += 1 
+        idle_animation = 0
+        idle_sprite += 1
     }
-    idle_animation %= idle_animation_times[idle_animation_times.length() - 1]
+    if (idle_sprite >= idle_animation_sprites.length())
+    {
+        idle_sprite = 3
+    }
     idle_sprite %= (idle_animation_sprites.length())
 }
 

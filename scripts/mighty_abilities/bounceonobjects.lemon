@@ -17,15 +17,22 @@ function void Character.LandingOnGroundResetState()
         if (char.flags & char.flag.ON_OBJECT)
         {
             // Don't bounce if we hit the following objects:
-            u32 object_standing_on = u32[0xffff0000 + char.object_standing_on]
+            u32 object_standing_on_address = 0xffff0000 + char.object_standing_on
+            u32 object_standing_on = u32[object_standing_on_address]
+            // AIZ Corkfloor (breakable from the top)
+            do_not_bounce |= object_standing_on == 0x02a502
+            // AIZ Corkfloor (breakable from the bottom)
+            do_not_bounce |= object_standing_on == 0x02a618
             // MGZ Tar Pit
             do_not_bounce |= object_standing_on == 0x032aae
             // ICZ Trampoline
             do_not_bounce |= object_standing_on == 0x08b8b6
             // MGZ spintop floor barrier
             do_not_bounce |= (break_mgz_spintop_floor == 2)
-        }
+            // LBZ spin launcher (has to check if the player landed in the right position)
+            do_not_bounce |= (object_standing_on == 0x28de4) && ((u8[object_standing_on_address + 0x2a] & 0x1) ? (u16[object_standing_on_address + 0x10] - objA0.position.x.u16) : (objA0.position.x.u16 - u16[object_standing_on_address + 0x10]) < 0x20)
 
+        }
         // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
         if (!do_not_bounce)
             store_bounce = 1
@@ -33,7 +40,8 @@ function void Character.LandingOnGroundResetState()
         // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
         velocity.x.copy = mainchar.groundhit.velocity.x
         velocity.y.copy = mainchar.groundhit.velocity.y
-        playSound(hammer_drop_state ? 0x5f : 0x49)
+        playSound(0x5f)
+        //playSound(hammer_crash ? 0x6e : 0x5f)
     }
     else if (super_ball_state)
     {
@@ -182,7 +190,7 @@ function void fn0411d8()
 //# address-hook(0x024280) end(0x0242b4)
 function void DamageCharacter()
 {
-    if (is_ES && A1 == 0xffffb000 && block_spikes)
+    if (isMightyA1() && block_spikes)
     {
         if (block_spikes == 1)
             playSound(SFX_HITSPIKES)
@@ -200,12 +208,14 @@ function void DamageCharacter()
 global bool bounce_on_object
 global bool change_state_after_landing
 global u32 barrel_to_push_down
+global u8 break_corkfloor
 global u8 break_mgz_spintop_floor
+global u8 open_soz2_boss
 
 //# address-hook(0x01e490)
 function void LetSonicClimbOnObject()
 {
-    if (!is_ES || A1 != 0xffffb000)
+    if (!isMightyA1())
     {
         base.LetSonicClimbOnObject()
         return
@@ -218,8 +228,6 @@ function void LetSonicClimbOnObject()
     }
 
     base.LetSonicClimbOnObject()
-    if (!is_ES || A1 != 0xffffb000)
-        return
     
     if (bounce_on_object)
     {
@@ -230,6 +238,81 @@ function void LetSonicClimbOnObject()
     else if (hammer_crash && u32[A0] == addressof(CNZBarrel.Update) && u16[A0 + 0x3a] == 0)
     {
         barrel_to_push_down = A0
+    }
+}
+
+function void fn01e006()
+{
+    base.fn01e006()
+    if (break_corkfloor)
+    {
+        D6 &= ~(1 << 16)
+        D6 |= (1 << 18)
+        break_corkfloor = 2
+    }
+    if (open_soz2_boss && (D6 & (1 << 20)))
+    {
+        D6 &= ~(1 << 20)
+        D6 |= (1 << 16)
+    }
+}
+
+//# address-hook(0x02a618) end(0x02a6d0)
+function void CorkFloor.Init()
+{
+    s16 velocity_temp = s16[0xffffb01a]
+    if (is_ES && hammer_drop_state)
+    {
+        break_corkfloor = 1
+        bounce_on_object = true
+    }
+
+    base.CorkFloor.Init()
+    if (break_corkfloor == 2)
+    {
+        s16[0xffffb01a] = velocity_temp
+        u32 a0_temp = A0
+        A0 = 0xffffb000
+        char.flags |= char.flag.IN_AIR
+        setRollingState()
+        A0 = a0_temp
+    }
+    bounce_on_object = false
+}
+
+//# address-hook(0x02a502) end(0x02a586)
+function void fn02a502()
+{
+    u32 update_temp = u32[A0]
+    s16 velocity_temp = s16[0xffffb01a]
+
+    base.fn02a502()
+    if (is_ES && hammer_drop_state && u32[A0] != update_temp)
+    {
+        s16[0xffffb01a] = velocity_temp
+    }
+}
+
+//# address-hook(0x01c38a) end(0x01c3f4)
+function void UpdateCameraBoundsInLevel()
+{
+    base.UpdateCameraBoundsInLevel()
+    break_corkfloor = 0
+}
+
+//# address-hook(0x01c664) end(0x01c68e)
+function void fn01c664()
+{
+    if (break_corkfloor == 2)
+    {
+        u16 camera_temp = camera.position.x.u16
+        camera.position.x.u16 = 0x2e0
+        base.fn01c664()
+        camera.position.x.u16 = camera_temp
+    }
+    else
+    {
+        base.fn01c664()
     }
 }
 
@@ -273,8 +356,21 @@ function void fn01dd0e()
 function void fn0317ae()
 {
     // CNZ Balloon
-    if (is_ES && A1 == 0xffffb000 && hammer_drop_state)
-        hammer_drop_state = 0
+    if (isMightyA1() && hammer_drop_state)
+    {
+        s16 velocity_temp = objA1.velocity.y
+        base.fn0317ae()
+        if (hammer_crash)
+        {
+            objA1.velocity.y = velocity_temp
+        }
+        else
+        {
+            objA1.velocity.y -= 0x200
+            hammer_drop_state = 0
+        }
+        return
+    }
     
     base.fn0317ae()
 }
@@ -283,7 +379,7 @@ function void fn0317ae()
 function void fn032f56()
 {
     // CNZ Bumper
-    if (is_ES && A1 == 0xffffb000 && hammer_drop_state)
+    if (isMightyA1() && hammer_drop_state)
         hammer_drop_state = 0
     
     base.fn032f56()
@@ -338,10 +434,37 @@ function void fn0400f0()
     // SOZ quicksand
     u8 on_object_temp = u8[0xffffb02a] & char.flag.ON_OBJECT
     base.fn0400f0()
-    if (is_ES && A1 == 0xffffb000 && hammer_drop_state && (u8[0xffffb02a] & char.flag.ON_OBJECT & ~on_object_temp))
+    if (isMightyA1() && hammer_drop_state && (u8[0xffffb02a] & char.flag.ON_OBJECT & ~on_object_temp))
     {
         hammer_drop_state = 0
         hammer_crash = 0
         playSound(0x5f)
+    }
+}
+
+//# address-hook(0x077cc6) end(0x077cee)
+function void fn077cc6()
+{
+    // SOZ-2 boss giant hitbox
+    if (hammer_drop_state)
+        open_soz2_boss = 1
+    
+    base.fn077cc6()
+    open_soz2_boss = 0
+}
+
+function void fn0780be()
+{
+    if (isMightyA1() && hammer_drop_state && (D6 & (1 << D0)))
+    {
+        u16 position_temp = objA1.position.x.u16
+        objA1.position.x.u16 = objA0.position.x.u16 - 1
+        base.fn0780be()
+        objA1.position.x.u16 = position_temp
+        objA1.velocity.x = -0x140
+    }
+    else
+    {
+        base.fn0780be()
     }
 }
