@@ -31,7 +31,6 @@ function void Character.LandingOnGroundResetState()
             do_not_bounce |= (break_mgz_spintop_floor == 2)
             // LBZ spin launcher (has to check if the player landed in the right position)
             do_not_bounce |= (object_standing_on == 0x28de4) && ((u8[object_standing_on_address + 0x2a] & 0x1) ? (u16[object_standing_on_address + 0x10] - objA0.position.x.u16) : (objA0.position.x.u16 - u16[object_standing_on_address + 0x10]) < 0x20)
-
         }
         // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
         if (!do_not_bounce)
@@ -40,8 +39,6 @@ function void Character.LandingOnGroundResetState()
         // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
         velocity.x.copy = mainchar.groundhit.velocity.x
         velocity.y.copy = mainchar.groundhit.velocity.y
-        playSound(0x5f)
-        //playSound(hammer_crash ? 0x6e : 0x5f)
     }
     else if (super_ball_state)
     {
@@ -76,6 +73,7 @@ function void updateGameObjectLoop()
         if (char.base_state == base_state.NORMAL && !(char.control_flags & control_flag.DISABLE_UPDATE) && !(char.flags & char.flag.IN_AIR))
         {
             mightyBounce()
+            playSound(0x5f)
             hammer_drop_rebound_protection = 30
         }
         A0 = a0_temp

@@ -149,6 +149,8 @@ function u8 getCharSpriteIndex()
 	return animationSprite
 }
 
+global bool modify_sprite_angle
+
 function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 {
 	// Don't modify this condition.
@@ -167,6 +169,14 @@ function bool Standalone.onWriteToSpriteTable(s16 px, s16 py, u16 renderQueue)
 
 	if (A0 == 0xffffb000)
 	{
+		if (hammer_drop_state)
+		{
+			modify_sprite_angle = true
+			bool result = base.Standalone.onWriteToSpriteTable(px, py, renderQueue)
+			modify_sprite_angle = false
+			return result
+		}
+
 		if (char.spindash == 0x80 || super_ball_state)
 		{
 			s16 afterImagesOffsetX = 0
@@ -240,4 +250,12 @@ function u16 blendColorsPacked(u16 colorA, u16 colorB, u16 blendFactor)
 		
 	}
 	return base.blendColorsPacked(colorA, colorB, blendFactor)
+}
+
+function void Renderer.drawSprite(u64 key, s16 px, s16 py, u16 atex, u8 flags, u16 renderQueue, u8 angle, u8 alpha)
+{
+	if (modify_sprite_angle)
+		angle = ((lookupAngleByVector(char.velocity.x >> 1, 0x800) - 0x40))
+
+	base.Renderer.drawSprite(key, px, py, atex, flags, renderQueue, angle, alpha)
 }

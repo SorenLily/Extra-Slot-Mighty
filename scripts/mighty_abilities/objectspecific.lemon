@@ -1,0 +1,254 @@
+global bool break_wall
+
+function void fn021758()
+{
+    if (is_ES && (D6 & 0x10000) && !(u8[0xffffb037] & 0x40) && super_ball_state)
+    {
+        u8[0xffffb037] |= 0x40
+        base.fn021758()
+        u8[0xffffb037] &= ~0x40
+        return
+    }
+
+    base.fn021758()
+}
+
+//# address-hook(0x021568) end(0x021690)
+function void fn021568()
+{
+    if (is_ES && !super.active && super_ball_state && !(objA0.flags2a & object.flag.P1_PUSHING))
+    {
+        break_wall = true
+        base.fn021568()
+        super.active = 0
+        break_wall = false
+        return
+    }
+
+    base.fn021568()
+}
+
+function void fn01e006()
+{
+    if (break_wall && A1 == 0xffffb000)
+    {
+        u16 position_temp = objA1.position.y.u16
+        base.fn01e006()
+        if (objA1.position.y.u16 != position_temp)
+        {
+            objA1.position.y.u16 = position_temp
+            super.active = 1
+        }
+        return
+    }
+    
+    base.fn01e006()
+}
+
+//# address-hook(0x01e042)
+function void fn01e042()
+{
+    if (break_wall && A1 == 0xffffb000)
+    {
+        u16 position_temp = objA1.position.x.u16
+        base.fn01e042()
+        if (objA1.position.x.u16 != position_temp)
+        {
+            objA1.position.x.u16 = position_temp
+            super.active = 1
+        }
+        return
+    }
+
+    base.fn01e042()
+}
+
+//# address-hook(0x01fd08) end(0x01ff1a)
+function void fn01fd08()
+{
+    if (is_ES && !super.active && super_ball_state && !(objA0.flags2a & object.flag.P1_PUSHING))
+    {
+        break_wall = true
+        base.fn01fd08()
+        super.active = 0
+        break_wall = false
+        return
+    }
+    
+    base.fn01fd08()
+}
+
+//# address-hook(0x031226) end(0x031458)
+function void fn031226()
+{
+    // HCZ conveyor belt
+    if (!isMightyA1() || u8[A2] != 0 || !hammer_drop_state)
+    {
+        base.fn031226()
+        return
+    }
+
+    // Replicate all the conditions for grabbing onto the conveyor belt.
+    if (objA1.position.x.u16 >= u16[A0 + 0x40] && objA1.position.x.u16 < u16[A0 + 0x42])
+    {
+        bool upperBelt = (u16[A1 + 0x1c] == 1)
+		u16 py = objA0.position.y.u16 + (upperBelt ? -0x14 : 0x14)
+
+        if (objA1.position.y.u16 > py && objA1.position.y.u16 <= py + 0x10)
+		{
+			if (debug_mode.state == 0 && u8[A1 + 0x05] < base_state.HURT && u8[A1 + 0x2e] == 0)
+            {
+                objA1.position.y.u16 += 0x40
+                base.fn031226()
+                objA1.position.y.u16 -= 0x40
+                return
+            }
+        }
+    }
+
+    base.fn031226()
+}
+
+// HCZ corkscrewslide
+
+//# address-hook(0x039102) end(0x039206)
+function void fn039102()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn039102()
+    if (isMightyA1() && (control_flags_temp == 0) && (u8[A1 + 0x2e] != 0))
+        keep_super_ball = true
+}
+
+//# address-hook(0x039208) end(0x03925a)
+function void fn039208()
+{
+    if (!isMightyA1())
+    {
+        base.fn039208()
+        return
+    }
+    base.fn039208()
+    if (super_ball_state && abs(s16[A1 + 0x1c]) < 0x800)
+    {
+        s16[A1 + 0x1c] = (s16[0x1c] > 0) ? min(s16[A1 + 0x1c] + 0x20, 0xa00) : max(s16[A1 + 0x1c] - 0x20, -0xa00)
+    }
+}
+
+//# address-hook(0x0390c2) end(0x0390f0)
+function void fn0390c2()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn0390c2()
+    if (isMightyA1() && control_flags_temp != 0 && u8[A1 + 0x2e] == 0)
+        keep_super_ball = false
+}
+
+// LBZ Booster Tube
+
+//# address-hook(0x029620) end(0x0296d2)
+function void fn029620()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn029620()
+    if (isMightyA1() && (control_flags_temp == 0) && (u8[A1 + 0x2e] != 0))
+        keep_super_ball = true
+}
+
+//# address-hook(0x02978e) end(0x0297a0)
+function void fn02978e()
+{
+    u8 control_flags_temp = u8[A1 + 0x2e]
+    base.fn02978e()
+    if (isMightyA1() && control_flags_temp != 0 && u8[A1 + 0x2e] == 0)
+        keep_super_ball = false
+}
+
+//# address-hook(0x028de4) end(0x028e70)
+function void SpinLauncher.Update()
+{
+    // LBZ Spin Launcher
+    s16 velocity_temp = s16[0xffffb01a]
+    u8 flags_temp = objA0.flags2a & object.flag.P1_ON_OBJECT
+    base.SpinLauncher.Update()
+    if (is_ES && flags_temp == (objA0.flags2a & object.flag.P1_ON_OBJECT) && (velocity_temp > 0) && s16[0xffffb01a] != velocity_temp)
+        s16[0xffffb01a] = velocity_temp
+}
+
+//# address-hook(0x08dc6e) end(0x08dcc4)
+function void fn08dc6e()
+{
+    // MHZ Mushmeanie collision logic
+    s16 velocity_temp.x = s16[0xffffb018]
+    s16 velocity_temp.y = s16[0xffffb01a]
+    s16 groundspeed_temp = s16[0xffffb01c]
+    base.fn08dc6e()
+    if (isMightyA1() && super_ball_state && (objA1.velocity.x != velocity_temp.x || objA1.velocity.y != velocity_temp.y))
+    {
+        objA1.velocity.x = velocity_temp.x
+        objA1.velocity.y = velocity_temp.y
+        objA1.groundspeed = groundspeed_temp
+    }
+}
+
+//# address-hook(0x03ec66) end(0x03ed08)
+function void fn03ec66()
+{
+    // MHZ Sticky Vine (pull the player and check for release)
+    if (isMightyA1() && super_ball_state)
+    {
+        if (u8[A0 + 0x3d] == 0)
+        {
+            u8[A0 + 0x3d] = 1
+            u8[A0 + 0x3e] = 0x10
+        }
+        s16 speed_temp = (objA1.flags2a & char.flag.IN_AIR) ? objA1.velocity.x : objA1.groundspeed
+        base.fn03ec66()
+        if (objA1.flags2a & char.flag.IN_AIR)
+            objA1.velocity.x = speed_temp
+        else
+            objA1.groundspeed = speed_temp
+
+        return
+    }
+    base.fn03ec66()
+}
+
+global bool no_recurse
+
+//# address-hook(0x03c636) end(0x03c6b6)
+function void fn03c636()
+{
+    // FBZ Parachute Bomb Door
+    if (no_recurse)
+    {
+        base.fn03c636()
+        return
+    }
+
+    s16 velocity_temp = s16[0xffffb01a]
+    u8 flags_temp = objA0.flags2a & object.flag.P1_ON_OBJECT
+    u32 other_address = 0xffff0000 + u16[A0 + 0x3c]
+    base.fn03c636()
+    if (is_ES && hammer_crash && (objA0.flags2a & object.flag.P1_ON_OBJECT) && !(flags_temp & object.flag.P1_ON_OBJECT))
+    {
+        u8[other_address + 0x40] = 0
+        s16[0xffffb01a] = velocity_temp
+        store_bounce = 0
+        no_recurse = true
+        fn03c636()
+        no_recurse = false
+    }
+}
+
+//# address-hook(0x03fd4e) end(0x03fe42)
+function void fn03fd4e()
+{
+    u8 on_object_temp = objA1.flags2a & char.flag.ON_OBJECT
+    base.fn03fd4e()
+    if (isMightyA1() && (objA1.flags2a & char.flag.ON_OBJECT) && !on_object_temp)
+    {
+        hammer_drop_state = 0
+        hammer_crash = 0
+    }
+}
