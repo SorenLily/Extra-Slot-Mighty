@@ -244,10 +244,13 @@ function void fn03c636()
 //# address-hook(0x03fd4e) end(0x03fe42)
 function void fn03fd4e()
 {
+    // SOZ sandflow
     u8 on_object_temp = objA1.flags2a & char.flag.ON_OBJECT
     base.fn03fd4e()
+    // If mighty "landed" on the sandflow...
     if (isMightyA1() && (objA1.flags2a & char.flag.ON_OBJECT) && !on_object_temp)
     {
+        // Stop the hammer drop.
         hammer_drop_state = 0
         hammer_crash = 0
     }

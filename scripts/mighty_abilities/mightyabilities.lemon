@@ -207,7 +207,6 @@ function void SonicPressedJumpInMidAir()
 
     // Start the hammer drop.
     // Note: it is possible to be both in the air and on an object in some specific circumstances.
-    debugLog(state_copy)
     if (!hammer_drop_state && !hammer_drop_rebound && !hammer_crash_lock && !is_in_magnetic_barrier && !(char.flags & char.flag.ON_OBJECT) && (state_copy != char.state.LIFTED))
     {
         hammer_drop_state = 1
@@ -229,7 +228,6 @@ function void SonicPressedJumpInMidAir()
 
         restore_state = false
     }
-    debugLog(restore_state)
     return
 }
 
@@ -266,8 +264,10 @@ function void Character.UpdateControlInAir()
         if (char.flags & char.flag.UNDERWATER)
             dy >>= 1
 
-        // Cancel any upward velocity the player has, and accelerate.
-        char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0xe00)
+        if (char.velocity.y < 0xe00)
+            char.velocity.y = clamp(char.velocity.y + dy, 0x100, 0xe00)
+        else
+            char.velocity.y -= 0x1c
     }
     if (hammer_drop_rebound)
         hammer_drop_rebound--
@@ -284,7 +284,6 @@ function void mightyBounce()
     if (global.inv_gravity)
         travel_dist = -travel_dist
     
-    if (travel_dist)
     s16 vx = velocity.x.copy
     s16 vy = velocity.y.copy
     velocity.x.copy = 0
@@ -305,18 +304,30 @@ function void mightyBounce()
     }
     else
     {
-        u16 max_force = 0xa80 + 0x180 * hammer_drop_max_height
-        u8 df = 0x4 + hammer_drop_bounce_force
-        force = 0x780 + 0x80 * hammer_drop_bounce_force
-        if (super.active)
+        if (travel_dist > 0x100)
         {
-            max_force += 0x180
-            df += 1
-            force += 0x80
+            u32 force_calc = travel_dist
+            force_calc = force_calc * u32(0x1c0)
+            force_calc = sqrt(force_calc) << 4
+            force_calc = (0x38 + force_calc) >> 1
+            force_calc -= 0x18
+            force = u16(force_calc)
         }
-        u16 len = (max_force - force) / df
-        force += clamp(travel_dist - 0x40, 0, len / 4) * (df * 2)
-        force += clamp(travel_dist - (0x40 + len / 4), 0, len / 2) * df
+        else
+        {
+            u16 max_force = 0xa80 + 0x180 * hammer_drop_max_height
+            u8 df = 0x4 + hammer_drop_bounce_force
+            force = 0x780 + 0x80 * hammer_drop_bounce_force
+            if (super.active)
+            {
+                max_force += 0x180
+                df += 1
+                force += 0x80
+            }
+            u16 len = (max_force - force) / df
+            force += clamp(travel_dist - 0x40, 0, len / 4) * (df * 2)
+            force += clamp(travel_dist - (0x40 + len / 4), 0, len / 2) * df
+        }
     }
     if (hammer_crash)
         char.velocity.x = 0
