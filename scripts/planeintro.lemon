@@ -1,0 +1,252 @@
+	//  - 0x0674ac	-> objA0.base_state = 0x00  -> Initialization (one frame)
+	//  - 0x067514	-> objA0.base_state = 0x02  -> Fade-in and short wait time before Tornado appears
+	//  - 0x067536	-> objA0.base_state = 0x04  -> Tornado flies in
+	//  - 0x067560	-> objA0.base_state = 0x06  -> Tornado hovers, Sonic waits shortly
+	//  - 0x067594	-> objA0.base_state = 0x08  -> Sonic jumps off
+	//  - 0x0675c0	-> objA0.base_state = 0x0a  -> Sonic goes offscreen to the left
+	//  - 0x067614	-> objA0.base_state = 0x0c  -> Offscreen transformation to Super Sonic
+	//  - 0x067624	-> objA0.base_state = 0x0e  -> Super Sonic overtakes the Tornado
+	//  - 0x06764e	-> objA0.base_state = 0x10  -> Super Sonic offscreen to the right
+	//  - 0x067674	-> objA0.base_state = 0x12  -> Camera catching up, Super Sonic gets visible again
+	//  - 0x0676ac	-> objA0.base_state = 0x14  -> The coast gets visible
+	//  - 0x0676c6	-> objA0.base_state = 0x16  -> Entering the beach
+	//  - 0x0676e8	-> objA0.base_state = 0x18  -> Over the beach and into the jungle
+	//  - 0x067704	-> objA0.base_state = 0x1a  -> Reaching the playable area and the place where Knuckles waits
+	//  - s16[0xffffb000 + 0x10] -> distance to island??
+	//  - u16[A0 + 0x40] - > plane speed?
+	
+global bool MightyPlaneIntro
+
+function bool isMightyIntro()
+{
+    return (is_ES && u32[0xffffb000] == addressof(Character.BaseUpdate.Sonic))
+}
+
+//# address-hook(0x067514) end(0x067514)
+function void fn067514()
+{
+	if (isMightyIntro())
+	{
+		base.fn067514()
+		MightyPlaneIntro = true
+	}
+	else
+		base.fn067514()
+}
+
+//sets when the plane descends into the water
+//# address-hook(0x067572) end(0x067592)
+function void fn067572()
+{
+	if (isMightyIntro())
+	{
+		objA0.base_state = 0x08
+		u16[A0 + 0x3a] = 1
+	}
+	else
+		base.fn067572()
+}
+
+//decides the timer before switching from state 0x06 to 0x08
+//# address-hook(0x067536) end(0x06755c)
+function void fn067536()
+{
+	if (isMightyIntro())
+	{
+	base.fn067536()
+	u16[A0 + 0x40] = 12
+	objA0.countdown_value = 395
+	}
+	else
+		base.fn067536()
+}
+
+//handles descension timer
+//# address-hook(0x067594) end(0x0675be)
+function void fn067594()
+{
+	if (isMightyIntro())
+	{
+		UpdateMovementStraight()
+		--u16[A0 + 0x3a]
+		if (u16[A0 + 0x3a] == 0) //resets x and y velocity to stop descension and changes the state
+		{
+			u16[A0 + 0x3a] = 1
+			objA0.base_state = 0x0a
+		}
+	}
+	else
+		base.fn067594()
+}
+
+//spawns in initial wave object
+//# address-hook(0x0675c0) end(0x0675f6)
+function void fn0675c0()
+{
+	if (isMightyIntro())
+	{
+		
+		if (s16[0xffffb000 + 0x10] >= 0x824)
+		{
+			objA0.base_state = 0x0c
+		}
+	}
+	else
+		base.fn0675c0()
+}
+
+//updates state to 0x0e
+//# address-hook(0x067614) end(0x067622)
+function void fn067614()
+{
+	if (isMightyIntro())
+	{
+		
+		if (s16[0xffffb000 + 0x10] > 0x824)
+		{
+			objA0.base_state = 0x0e
+			u16[A0 + 0x3a] = 1
+			u16[A0 + 0x3b] = 1
+			char.animation.timer = 1
+		}
+		
+		return
+	}
+	else
+		base.fn067614()
+}
+
+//velocity of the plane reducing as it reaches the island
+//# address-hook(0x067624) end(0x06764c)
+function void fn067624()
+{
+	if (isMightyIntro())
+	{
+		UpdateMovementStraight()
+			
+		objA0.base_state = 0x10
+		playSound(SFX_JUMP)
+		objA0.position.x.u16 += 3
+		updateSonicAnimation_shared()
+		objA0.velocity.y = -0x480
+		u16[A0 + 0x40] = 0x990 >> 8
+	}
+	else
+		base.fn067624()
+}
+
+//decides when jump ends & gravity simulation
+//# address-hook(0x06764e) end(0x067672)
+function void fn06764e()
+{
+	if (isMightyIntro())
+	{
+		objA0.position.y += objA0.velocity.y << 8
+		objA0.velocity.y += 50
+		
+		A1 = 0x012b02
+		updateSonicAnimation_shared()
+		
+		if (objA0.velocity.y > 0 && objA0.position.y.u16 >= 0x14e - 20)
+		{
+			objA0.base_state = 0x12
+		}
+	}
+	else
+		base.fn06764e()
+}
+
+//running & initialisation
+//# address-hook(0x067674) end(0x0676aa)
+function void fn067674()
+{
+	if (isMightyIntro())
+	{
+		
+		if (u16[0xffffb000 + 0x10] >= 0x13d2)
+		{
+			StartGame()
+
+		#if STANDALONE
+			Game.endSkippableCutscene()
+		#endif
+			
+			A1 = 0xffffb000
+			u8[A1 + 0x05] = 0x02
+			s16[A1 + 0x1c] = 0x700
+			objA1.position.y.u16 = 0x041e
+			objA1.state = char.state.RUNNING
+			objA1.animation.sprite = objA0.animation.sprite
+			objA1.animation.timer = 0
+			u8[A1 + 0x2e] = 0
+			
+			UnloadObject()
+		}
+		else
+		{
+		--objA0.animation.timer
+		if (s16[0xffffb000 + 0x10] > 0xd2e)
+		{
+            {
+                if (objA0.animation.timer == 0) //Plane slowing down and Amy jumps
+                {
+                    objA0.animation.timer = 3
+                    if (objA0.position.y.u16 > 0x10e)
+                        objA0.position.y.u16 -= 1
+                }
+            }
+		}
+		if (objA0.animation.timer == 0) //Plane slowing down and Amy jumps
+			{
+				objA0.animation.timer = 70
+				if (u16[A0 + 0x40] > 7)
+					u16[A0 + 0x40] -= 1
+			}
+		if (u16[A0 + 0x40] <= 7)
+			MightyPlaneIntro = false
+		objA0.animation.sprite = 0x21 + ((level.framecounter/3) % 4)
+		}
+	}
+	else
+		base.fn067674()
+}
+
+//Keep the tornado in place and delete the tornado
+//# address-hook(0x0677ce) end(0x0677fa)
+function void fn0677ce()
+{
+	A1 = 0xffff0000 + u16[A0 + 0x46]
+	if (isMightyIntro() && objA1.base_state >= 0x10)
+	{
+		if (objA1.base_state >= 0x12)
+		{
+			Object.TriggerUnloading()
+			return
+		}
+		
+		objA0.position.x += 0x990 << 8
+		objA0.position.y -= 0x80 << 8
+		DrawObject()
+	}
+	else
+		base.fn0677ce()
+}
+
+function void StartGame() //made this a function in case I wanna add alternative intros in the future
+{
+	u8[0xfffff650] = 0
+	player1.control_override = 0
+	fn083c06()
+	fn0851e4()
+	if (allocDynamicObjectStd())
+	{
+		// Show title card
+		objA1.update_address = 0x02d690
+	}
+
+	global.level_started = -0x6f	// Let HUD fly in
+	hud.dirty.timer = 0x80
+	timer.alldata = 0
+	hud.dirty.lives = 0x01
+	Object.TriggerUnloading()
+}

@@ -34,11 +34,10 @@ function void Character.LandingOnGroundResetState()
         }
         // Don't bounce if we're standing on the ICZ trampoline. Otherwise, flag that we need to bounce.
         if (!do_not_bounce)
+        {
             store_bounce = 1
-        
-        // Store copies of velocity so we can use it for the bounce later. Also play the sound now.
-        velocity.x.copy = mainchar.groundhit.velocity.x
-        velocity.y.copy = mainchar.groundhit.velocity.y
+            super_ball_state = 0
+        }
     }
     else if (super_ball_state)
     {
@@ -83,7 +82,7 @@ function void updateGameObjectLoop()
         // Reset hammer drop state.
         hammer_drop_state = 0
         hammer_crash = 0
-        // Don't reset bouncy ball state, it's allowed to carry over between bounces.
+        //super_ball_state = 0
     }
 
     trigger_mgz_spinwheel = false

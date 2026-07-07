@@ -64,7 +64,7 @@ function string getCharacterBonusTextIcon(u8 character)
 
 function u64 Standalone.getModdedAnimationSpriteKey(u8 character, u16 animationSpriteEx)
 {
-	if (isMighty())
+	if (is_ES && (((A0 == 0xffffb000) && u32[A0] == 0x010a94) || u32[A0] == 0x067472))
 	{
 		string str = ""
 		if (char.state == char.state.WIN_POSE)

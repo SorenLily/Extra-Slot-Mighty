@@ -10,19 +10,21 @@ global u8 hammer_drop_speed_clamp
 global u8 hammer_drop_state
 // Used for animation after bouncing from hammer drop, and as the cooldown of hammer drop.
 global u8 hammer_drop_rebound
-// --
-global u8 hammer_crash
-// --
-global u8 hammer_crash_lock
-// --
+// Flag indicating hammer crash, which is a hammer drop that always bounces very short.
+global bool hammer_crash
+// Flag that prevents abilities from being used after bouncing with hammer crash.
+global bool hammer_crash_lock
+// Copy of y-position that hammer drop was used at.
 global u16 hammer_drop_starting_point
-// --
+// Timer that protects from damage while active.
 global u8 hammer_drop_rebound_protection
-// --
+// Flag that forces going out of the water to double your velocity so that bounces work correctly.
+global bool strong_bounce
+// State that causes Mighty to accelerate on the ground and destroy various objects.
 global u8 super_ball_state
-// --
+// Flag that prevents super ball state from being lost to normal state checks.
 global bool keep_super_ball
-// --
+// Animation state for super ball.
 global u8 super_ball_animation_state
 // State for blocking damage from spike collisions.
 global u8 block_spikes
@@ -30,13 +32,10 @@ global u8 block_spikes
 global bool is_in_magnetic_barrier
 // Flag used to denote that we will bounce later this frame.
 global s8 store_bounce
-// Copies of velocity used for bouncing.
-global s16 velocity.x.copy
-global s16 velocity.y.copy
 // Variables for win pose animation.
 global u8 mighty_wp_frame
 global u8 mighty_wp_timer
-// --
+// Variables for idle animation.
 global u8 idle_animation
 global u8 idle_sprite
 
@@ -47,7 +46,7 @@ global bool supress_sfx
 constant array<u8> WP_TIMES = {4, 8, 12, 16, 20, 28, 32, 36, 39, 42}
 
 constant array<u8> idle_animation_times =   {  8,  8, 12, 120, 10, 24, 10, 24, 10, } //10, 10, 10, 10, }
-constant array<u8> idle_animation_sprites = {  1,  2,  3,   4,  5,  6,  7,  6,  5, }// 4,  8,  9, 10, }
+constant array<u8> idle_animation_sprites = {  1,  2,  3,   4,  5,  6,  7,  6,  5, } // 4,  8,  9, 10, }
 
 constant u8 BOUNCY_BALL_MAX = 5
 constant u8 BOUNCY_BALL_WINDUP = 20
@@ -111,12 +110,11 @@ function void Character.Initialization.shared(u8 character)
     hammer_crash = 0
     hammer_drop_starting_point = 0
     hammer_drop_rebound_protection = 0
+    strong_bounce = 0
     super_ball_state = 0
     keep_super_ball = 0
     super_ball_animation_state = 0
     block_spikes = 0
-    velocity.x.copy = 0
-    velocity.y.copy = 0
     mighty_wp_frame = 0
     mighty_wp_timer = 0
     clearTaggedObjects()
@@ -145,6 +143,7 @@ function void Character.BaseUpdate.Sonic()
         hammer_crash = 0
         hammer_drop_rebound = 0
         hammer_drop_rebound_protection = 0
+        strong_bounce = 0
     }
 
     if (char.base_state != base_state.NORMAL || isFloating() || ((char.control_flags & (control_flag.DISABLE_UPDATE | control_flag.DISABLE_ANIMATION)) && !keep_super_ball))
@@ -180,7 +179,7 @@ function void Character.updateJumpMoves()
 {
     state_copy = char.state
     base.Character.updateJumpMoves()
-    if (restore_state)
+    if (isMighty() && restore_state)
         char.state = state_copy
     restore_state = false
 }
@@ -188,7 +187,7 @@ function void Character.updateJumpMoves()
 function bool onCharacterPressedJumpInMidAir(u8 input_state, u8 input_pressed)
 {
     bool result = base.onCharacterPressedJumpInMidAir(input_state, input_pressed)
-    if (result)
+    if (isMighty() && result)
         restore_state = true
     return result
 }
@@ -283,11 +282,6 @@ function void mightyBounce()
 
     if (global.inv_gravity)
         travel_dist = -travel_dist
-    
-    s16 vx = velocity.x.copy
-    s16 vy = velocity.y.copy
-    velocity.x.copy = 0
-    velocity.y.copy = 0
 
     // The angle to bounce toward.
     u8 reflected_angle = char.rotation
@@ -304,7 +298,11 @@ function void mightyBounce()
     }
     else
     {
-        if (travel_dist > 0x100)
+        u16 max_force = 0xa80 + 0x180 * (hammer_drop_max_height + (super.active != 0))
+        u32 max_bounce_height = square((2 * u32(max_force) - 0x38))
+        max_bounce_height /= 0x1c0
+        max_bounce_height >>= 8
+        if (travel_dist > max_bounce_height)
         {
             u32 force_calc = travel_dist
             force_calc = force_calc * u32(0x1c0)
@@ -312,15 +310,14 @@ function void mightyBounce()
             force_calc = (0x38 + force_calc) >> 1
             force_calc -= 0x18
             force = u16(force_calc)
+            strong_bounce = 1
         }
         else
         {
-            u16 max_force = 0xa80 + 0x180 * hammer_drop_max_height
             u8 df = 0x4 + hammer_drop_bounce_force
             force = 0x780 + 0x80 * hammer_drop_bounce_force
             if (super.active)
             {
-                max_force += 0x180
                 df += 1
                 force += 0x80
             }
@@ -330,11 +327,27 @@ function void mightyBounce()
         }
     }
     if (hammer_crash)
+    {
         char.velocity.x = 0
+        char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
+    }
     else
+    {
+        reflected_angle += 0x40
+        if (reflected_angle > 0 && reflected_angle < 0x40)
+            reflected_angle = reflected_angle / 2
+        else if (reflected_angle > 0x40 && reflected_angle < 0x80)
+            reflected_angle = (0x80 + reflected_angle) / 2
+        else if (reflected_angle > 0x80 && reflected_angle < 0xc0)
+            reflected_angle = 0x80 + (reflected_angle & 0x7f) / 2
+        else if (reflected_angle > 0xc0)
+            reflected_angle = 0x80 + (0x80 - (0x80 - (reflected_angle & 0x7f)) / 2)
+        reflected_angle -= 0x40
+
+
         char.velocity.x += (s32(lookupCos(reflected_angle)) * force) >> 8
-    
-    char.velocity.y += (s32(lookupSin(reflected_angle)) * force) >> 8
+        char.velocity.y = (s32(lookupSin(reflected_angle)) * force) >> 8
+    }
 
     if (char.flags & char.flag.UNDERWATER)
     {
@@ -455,8 +468,8 @@ function void updateCharacterControlOnGround()
     {
         // Super Ball acceleration
         s16 dv = 0
-        u16 increment = 0x18 + 0x10 * (super_ball_acceleration)
-        u16 max_speed = 0x800 + (0x100 * super_ball_max_speed) - increment
+        u16 increment = 0x20 + 0x10 * (super_ball_acceleration)
+        u16 max_speed = 0x900 + (0x100 * super_ball_max_speed) - increment
         if (super.active)
         {
             increment += 0x18
@@ -600,6 +613,13 @@ function void Character.checkForWaterSurface()
 
 	bool wasUnderwaterBefore = (char.flags & char.flag.UNDERWATER) != 0
 	bool isUnderwaterNow = (s16(char.position.y.u16) > s16(water.height.current))
+    if (wasUnderwaterBefore && !isUnderwaterNow && char.velocity.y < -0x400 && strong_bounce)
+    {
+        base.Character.checkForWaterSurface()
+        char.velocity.y *= 2
+        return
+    }
+
 	if (isUnderwaterNow == wasUnderwaterBefore || (!wasUnderwaterBefore) || char.velocity.y >= -0x400 || char.velocity.y <= -0x800)
     {
         base.Character.checkForWaterSurface()
